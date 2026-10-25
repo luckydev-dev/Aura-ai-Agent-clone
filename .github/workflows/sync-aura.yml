@@ -1,0 +1,71 @@
+name: Clone Aura Source
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "Branch from luckydev-dev/Aura-Ai-Agent"
+        required: true
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-aura-source
+  cancel-in-progress: false
+
+jobs:
+  clone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout destination repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch source repository
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$SOURCE_BRANCH" https://github.com/luckydev-dev/Aura-Ai-Agent.git /tmp/aura-source
+
+      - name: Replace destination files with source
+        run: |
+          set -euo pipefail
+
+          # Keep the new sync workflow so this action remains available after syncing.
+          mkdir -p /tmp/preserved-workflow
+          cp .github/workflows/sync-aura.yml /tmp/preserved-workflow/sync-aura.yml
+
+          # Delete all destination working files except Git metadata.
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
+
+          # Copy the complete source working tree.
+          cp -a /tmp/aura-source/. .
+
+          # Restore the sync workflow, replacing the source build workflow if needed.
+          mkdir -p .github/workflows
+          cp /tmp/preserved-workflow/sync-aura.yml .github/workflows/sync-aura.yml
+
+      - name: Commit and replace destination main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Destination already matches source."
+            exit 0
+          fi
+
+          git commit -m "Sync files from Aura-Ai-Agent"
+          # This is a dedicated clone repository; replace its main branch with the sync commit.
+          git push --force origin HEAD:main
