@@ -46,10 +46,13 @@ jobs:
           cp "$work/clone-aura.yml" .github/workflows/clone-aura.yml
 
       - name: Commit and push clone
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
           git add -A
           if git diff --cached --quiet; then
             echo "Already synchronized."
