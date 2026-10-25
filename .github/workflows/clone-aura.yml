@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Clone source repository and replace files
+      - name: Copy source repository files
         env:
           SOURCE_REPO: https://github.com/luckydev-dev/Aura-Ai-Agent.git
           SOURCE_BRANCH: ${{ inputs.source_branch }}
@@ -33,32 +33,25 @@ jobs:
           set -euo pipefail
           work="$(mktemp -d)"
           trap 'rm -rf "$work"' EXIT
-
           git clone --depth 1 --branch "$SOURCE_BRANCH" "$SOURCE_REPO" "$work/source"
 
-          # Keep this workflow so the clone action remains available after sync.
-          mkdir -p "$work/preserved-workflow"
-          cp .github/workflows/clone-aura.yml "$work/preserved-workflow/clone-aura.yml"
-
-          # Remove tracked and untracked project files, but preserve .git and the workflow.
-          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github -exec rm -rf -- {} +
-          find .github -mindepth 1 -maxdepth 1 ! -name workflows -exec rm -rf -- {} + 2>/dev/null || true
-          find .github/workflows -mindepth 1 -maxdepth 1 ! -name clone-aura.yml -exec rm -rf -- {} + 2>/dev/null || true
-
-          # Copy the complete source working tree and preserve the clone action.
+          # Preserve this workflow, remove the previous clone contents, and copy source.
+          cp .github/workflows/clone-aura.yml "$work/clone-aura.yml"
+          git rm -r --ignore-unmatch .
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
           cp -a "$work/source/." .
           mkdir -p .github/workflows
-          cp "$work/preserved-workflow/clone-aura.yml" .github/workflows/clone-aura.yml
+          cp "$work/clone-aura.yml" .github/workflows/clone-aura.yml
 
-      - name: Commit and push cloned files
+      - name: Commit and push clone
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "Repository is already synchronized."
+            echo "Already synchronized."
             exit 0
           fi
-          git commit -m "Sync files from Aura-Ai-Agent"
+          git commit -m "Clone latest Aura source"
           git push
