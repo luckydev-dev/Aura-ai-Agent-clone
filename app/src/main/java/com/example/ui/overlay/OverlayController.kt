@@ -122,7 +122,23 @@ class OverlayController(
     }
 
     fun dodgeCaptions(targetX: Int, targetY: Int) {
-        floatingCaptionOverlay.dodgeIfNeeded(targetX, targetY)
+        runCatching {
+            floatingCaptionOverlay.dodgeIfNeeded(targetX, targetY)
+        }.onFailure { Log.w(TAG, "Caption dodge failed; input action continues", it) }
+    }
+
+    fun edgeLightingLifecycleChanged() {
+        controllerScope.launch {
+            try {
+                if (preferences.edgeLightingEnabled.first() && isCallActive && !AuraApplication.isSafeMode.value) {
+                    edgeLightingOverlay.onServiceLifecycleChanged()
+                } else {
+                    reEvaluateOverlays(AppForegroundState.current)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to recover edge lighting after service lifecycle change", e)
+            }
+        }
     }
 
     /**
