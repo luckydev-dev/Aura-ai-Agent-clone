@@ -15,6 +15,8 @@ import com.example.core.input.InputController
 import com.example.core.input.InputEvent
 import com.example.core.input.InputEventType
 import kotlinx.coroutines.*
+import com.example.core.util.onMainBlocking
+import com.example.core.util.runOnMain
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -59,11 +61,16 @@ class AgentCursorOverlay(
 
     var isEnabled: Boolean = true
     var cursorStyle: CursorStyle = CursorStyle.ARROW
+        set(value) { field = value; runOnMain { cursorView?.cursorStyle = value } }
     var cursorSpeed: CursorSpeed = CursorSpeed.NORMAL
     var cursorSizeDp: Float = 26f
+        set(value) { field = value; runOnMain { cursorView?.cursorSizeDp = value } }
     var showTrail: Boolean = true
+        set(value) { field = value; runOnMain { cursorView?.showTrail = value } }
     var showRipple: Boolean = true
+        set(value) { field = value; runOnMain { cursorView?.showRipple = value } }
     var showActionLabel: Boolean = true
+        set(value) { field = value; runOnMain { cursorView?.showActionLabel = value }
     var showDuringUnlock: Boolean = false
 
     init {
@@ -73,9 +80,10 @@ class AgentCursorOverlay(
         }
     }
 
-    @Synchronized
-    fun ensureAttached(): Boolean {
-        if (isAttached && cursorView != null) return true
+    fun ensureAttached(): Boolean = onMainBlocking { ensureAttachedOnMain() }
+
+    private fun ensureAttachedOnMain(): Boolean {
+        if (isAttached && cursorView != null && cursorView?.windowToken != null && cursorView?.isAttachedToWindow == true) return true
         if (!Settings.canDrawOverlays(context) && !com.example.service.AuraAccessibilityService.isRunning()) {
             Log.w(TAG, "Cannot attach AgentCursorOverlay: neither SYSTEM_ALERT_WINDOW nor Accessibility active")
             return false
@@ -114,8 +122,9 @@ class AgentCursorOverlay(
         }
     }
 
-    @Synchronized
-    fun detachOverlay() {
+    fun detachOverlay() = runOnMain { detachOverlayOnMain() }
+
+    private fun detachOverlayOnMain() {
         OverlayWindowDefaults.unregisterOverlay("AgentCursor")
         val view = cursorView
         val wm = activeWindowManager ?: (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
@@ -132,18 +141,13 @@ class AgentCursorOverlay(
         }
     }
 
-    fun setVisibility(visibility: Int) {
-        cursorView?.visibility = visibility
-    }
+    fun setVisibility(visibility: Int) = runOnMain { cursorView?.visibility = visibility }
 
     fun hideTemporarily() {
         detachOverlay()
     }
 
-    fun show(): Boolean {
-        isEnabled = true
-        return true
-    }
+    fun show(): Boolean = onMainBlocking { isEnabled = true; true }
 
     fun hide() {
         detachOverlay()
