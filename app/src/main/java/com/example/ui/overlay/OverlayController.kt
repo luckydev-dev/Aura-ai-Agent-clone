@@ -122,6 +122,20 @@ class OverlayController(
         }
     }
 
+    fun edgeLightingLifecycleChanged() {
+        controllerScope.launch {
+            try {
+                if (preferences.edgeLightingEnabled.first() && isCallActive && !AuraApplication.isSafeMode.value) {
+                    edgeLightingOverlay.onServiceLifecycleChanged()
+                } else {
+                    reEvaluateOverlays(AppForegroundState.current)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to recover edge lighting after service lifecycle change", e)
+            }
+        }
+    }
+
     fun dodgeCaptions(targetX: Int, targetY: Int) {
         runOnMain {
             runCatching {
