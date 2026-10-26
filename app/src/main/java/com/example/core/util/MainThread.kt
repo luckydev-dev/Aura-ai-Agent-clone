@@ -11,7 +11,7 @@ import kotlinx.coroutines.withTimeout
  * Runs a short View-related operation on the Android main thread.
  * Never blocks the main thread waiting for itself.
  */
-fun <T> onMainBlocking(block: () -> T): T {
+inline fun <T> onMainBlocking(crossinline block: () -> T): T {
     if (Looper.myLooper() == Looper.getMainLooper()) return block()
     return runBlocking(Dispatchers.Main.immediate) {
         withTimeout(2_000L) { block() }
