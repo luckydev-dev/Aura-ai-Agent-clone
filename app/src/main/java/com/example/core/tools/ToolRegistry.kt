@@ -208,6 +208,7 @@ class ToolRegistry(
 
         // Per-tool timeout definition
         val timeoutMs = when {
+            name == "run_task" -> 300_000L
             name in listOf("read_screen", "tap_element", "type_text", "swipe", "perform_agent_task") -> 90_000L
             name in listOf("run_shell", "reboot", "shutdown") -> 30_000L
             else -> 15_000L
@@ -238,7 +239,13 @@ class ToolRegistry(
             ToolExecutionResult(false, "Tool timed out after ${timeoutMs / 1000} seconds")
         } catch (e: Exception) {
             Log.e("Aura", "Tool $name execution failed with exception: ${e.message}", e)
-            ToolExecutionResult(false, "Tool execution failed: ${e.message}")
+            val safeError = JSONObject()
+                .put("success", false)
+                .put("error_code", if (e is SecurityException) "NO_ACCESSIBILITY" else "TOOL_EXCEPTION")
+                .put("message", if (e is SecurityException) "Android denied this action." else "The tool failed internally; technical details were written to Aura Diagnostics.")
+                .put("suggested_next", "Read the screen and try a different supported interaction method.")
+                .toString()
+            ToolExecutionResult(false, safeError)
         } finally {
             progressJob.cancel()
         }
