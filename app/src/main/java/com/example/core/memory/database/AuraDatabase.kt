@@ -57,12 +57,6 @@ interface UserFactDao {
     @Query("SELECT * FROM user_facts WHERE `key` = :key LIMIT 1")
     suspend fun findByKey(key: String): UserFactEntity?
 
-    @Query("SELECT * FROM user_facts WHERE LOWER(TRIM(`key`)) = LOWER(TRIM(:key)) ORDER BY id DESC LIMIT 1")
-    suspend fun findByKeyNormalized(key: String): UserFactEntity?
-
-    @Query("SELECT * FROM user_facts WHERE id = :id LIMIT 1")
-    suspend fun getById(id: Long): UserFactEntity?
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(fact: UserFactEntity): Long
 
