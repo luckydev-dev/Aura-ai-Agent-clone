@@ -499,26 +499,50 @@ class ScreenAutomationTools(
                             return@coroutineScope
                         }
 
-                        // 1. Wait for UI to settle
-                        val nodes = waitForUiIdle()
-
-                        // 2. Sensitive screen check
-                        val (isSensitive, reason) = agentPlanner.isSensitiveScreen(nodes)
-                        if (isSensitive) {
-                            taskOutcome = "Safety Layer: $reason. Requires manual user entry."
+                        if (System.currentTimeMillis() >= taskDeadline) {
+                            taskOutcome = "Task reached the 5-minute time limit."
                             taskSuccess = false
                             return@coroutineScope
                         }
 
-                        // 3. Loop guard
-                        if (agentPlanner.isRepeatingLoop(history)) {
-                            Log.w(TAG, "Repeating loop detected. Attempting to scroll or press back...")
-                            inputController.pressKey(4, "Back")
-                            delay(500)
+                        // Observe the actual external application, never Aura's own activity.
+                        var nodes = waitForUiIdle(maxWaitMs = 2500L, pollIntervalMs = 250L)
+                        var foregroundInfo = AuraAccessibilityService.instance?.getForegroundInfo()
+                        if (foregroundInfo?.isAuraOnTop == true) {
+                            Log.w(TAG, "Aura is on top; returning to the last external app before observing")
+                            inputController.pressKey(4, "Back to external app")
+                            delay(400L)
+                            foregroundInfo = AuraAccessibilityService.instance?.getForegroundInfo()
+                            if (foregroundInfo?.isAuraOnTop == true && foregroundInfo.lastExternalPackage.isNotBlank()) {
+                                appInventory.openApp(foregroundInfo.lastExternalPackage)
+                                delay(600L)
+                                foregroundInfo = AuraAccessibilityService.instance?.getForegroundInfo()
+                            }
+                            if (foregroundInfo?.isAuraOnTop == true) {
+                                taskOutcome = "SCREEN_IS_AURA: Aura is still on top; last external app is " + foregroundInfo.lastExternalPackage
+                                taskSuccess = false
+                                return@coroutineScope
+                            }
+                            nodes = waitForUiIdle(maxWaitMs = 2500L, pollIntervalMs = 250L)
                         }
 
-                        // 4. Foreground app
-                        val fgApp = nodes.firstOrNull { it.packageName.isNotBlank() }?.packageName ?: "Unknown"
+                        // Do not abort merely because a login or settings screen contains an OTP/password label.
+                        // Destructive confirmation is evaluated against the planned action below.
+                        // Loop guard
+                        if (agentPlanner.isRepeatingLoop(history)) {
+                            Log.w(TAG, "Repeating loop detected. Trying an alternate recovery step")
+                            val scrollResult = inputController.swipeDirection("down", "Task recovery scroll")
+                            if (!scrollResult) inputController.pressKey(4, "Back")
+                            delay(500L)
+                            nodes = waitForUiIdle(maxWaitMs = 2500L, pollIntervalMs = 250L)
+                            foregroundInfo = AuraAccessibilityService.instance?.getForegroundInfo()
+                        }
+
+                        // Foreground app always comes from the same window-aware reader.
+                        val fgApp = foregroundInfo?.foregroundPackage?.takeIf { it.isNotBlank() }
+                            ?: foregroundInfo?.lastExternalPackage?.takeIf { it.isNotBlank() }
+                            ?: nodes.firstOrNull { it.packageName.isNotBlank() }?.packageName
+                            ?: "Unknown"
 
                         // 5. Plan next step via Gemini REST
                         val planResult = agentPlanner.planNextStep(
