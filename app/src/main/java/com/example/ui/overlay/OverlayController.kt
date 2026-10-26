@@ -122,7 +122,9 @@ class OverlayController(
     }
 
     fun dodgeCaptions(targetX: Int, targetY: Int) {
-        floatingCaptionOverlay.dodgeIfNeeded(targetX, targetY)
+        runCatching {
+            floatingCaptionOverlay.dodgeIfNeeded(targetX, targetY)
+        }.onFailure { Log.w(TAG, "Caption dodge failed; continuing input action", it) }
     }
 
     /**
