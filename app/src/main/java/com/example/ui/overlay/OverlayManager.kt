@@ -25,6 +25,7 @@ import com.example.service.AuraForegroundService
 import com.example.ui.components.AuraOrb
 import com.example.ui.components.OrbState
 import com.example.ui.theme.AuraTheme
+import com.example.core.util.onMainBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
 
@@ -47,7 +48,7 @@ class OverlayManager(private val context: Context) {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    fun showOverlay() {
+    fun showOverlay() = onMainBlocking {
         OverlayGuard.run("mini_orb", context) {
             if (isOverlayShowing || !Settings.canDrawOverlays(context)) return@run
 
@@ -181,7 +182,7 @@ class OverlayManager(private val context: Context) {
         }
     }
 
-    fun hideOverlay() {
+    fun hideOverlay() = onMainBlocking {
         OverlayGuard.run("mini_orb", context) {
             if (!isOverlayShowing || overlayHost == null) return@run
             overlayHost?.detach()
