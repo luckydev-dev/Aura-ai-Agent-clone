@@ -62,14 +62,15 @@ class AgentPlanner(
         )
 
         for (node in nodes) {
-            val visibleText = "${node.text} ${node.contentDescription}".lowercase()
+            val combined = "${node.text} ${node.contentDescription} ${node.resourceId}".lowercase()
             for (kw in sensitiveKeywords) {
-                val safeKeyword = Regex.escape(kw.lowercase())
-                if (Regex("(?<![\\p{L}\\p{N}])$safeKeyword(?![\\p{L}\\p{N}])").containsMatchIn(visibleText)) {
+                if (combined.contains(kw)) {
                     return Pair(true, "Sensitive screen detected: contains '$kw'")
                 }
             }
-            if (node.className.contains("password", ignoreCase = true) && visibleText.isNotBlank()) {
+            if (node.className.contains("password", ignoreCase = true) ||
+                node.resourceId.contains("password", ignoreCase = true)
+            ) {
                 return Pair(true, "Password entry screen detected")
             }
         }
@@ -134,7 +135,7 @@ class AgentPlanner(
 
         // Format compact numbered tree
         val sbTree = StringBuilder()
-        nodes.take(120).forEach { node ->
+        nodes.take(50).forEach { node ->
             sbTree.append("[#${node.index}] ")
             if (node.text.isNotBlank()) sbTree.append("\"${node.text}\" ")
             if (node.contentDescription.isNotBlank() && node.contentDescription != node.text) {
@@ -152,7 +153,7 @@ class AgentPlanner(
         if (history.isEmpty()) {
             sbHistory.append("None (Starting task)\n")
         } else {
-            history.takeLast(15).forEach { h ->
+            history.takeLast(8).forEach { h ->
                 sbHistory.append("Step ${h.stepIndex}: ${h.action} -> ${h.result}\n")
             }
         }
@@ -161,7 +162,6 @@ class AgentPlanner(
             append("You are Aura Autonomous Android Agent. Your goal is to operate the Android smartphone to accomplish the user's request.\n")
             append("Goal: \"$goal\"\n\n")
             append("Current Foreground App: $foregroundApp\n\n")
-            append("PHONE CONTROL: Read the screen first, prefer exact labelled elements, use coordinates only as a last resort, never repeat toggles merely because the screen appears unchanged, and ask explicit confirmation before destructive or irreversible actions.\n")
             append("Recent Action History:\n$sbHistory\n")
             append("Current Screen Interactive Elements:\n${sbTree.ifBlank { "Screen has no indexed elements or is loading." }}\n\n")
             append("Available Actions:\n")
