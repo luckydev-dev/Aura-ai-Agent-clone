@@ -1,0 +1,6 @@
+{
+  "name": "Aura",
+  "description": "Root-powered realtime voice agent for Android with bidirectional Gemini Live streaming, screen automation, and device control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

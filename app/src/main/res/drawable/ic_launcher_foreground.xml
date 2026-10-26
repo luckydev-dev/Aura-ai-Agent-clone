@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer ambient ring -->
+    <path
+        android:strokeWidth="2.5"
+        android:pathData="M 54, 22 A 32,32 0 1,0 54, 86 A 32,32 0 1,0 54, 22">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="22"
+                android:startY="22"
+                android:endX="86"
+                android:endY="86"
+                android:type="linear">
+                <item android:color="#40FFB36B" android:offset="0.0" />
+                <item android:color="#40FF6B8B" android:offset="0.5" />
+                <item android:color="#408B6BFF" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Concentric audio wave arcs -->
+    <path
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 28, 54 A 26,26 0 0,1 42, 31">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="28"
+                android:startY="54"
+                android:endX="42"
+                android:endY="31"
+                android:type="linear">
+                <item android:color="#FFB36B" android:offset="0.0" />
+                <item android:color="#FF8A7A" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 80, 54 A 26,26 0 0,0 66, 77">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="80"
+                android:startY="54"
+                android:endX="66"
+                android:endY="77"
+                android:type="linear">
+                <item android:color="#FF6B8B" android:offset="0.0" />
+                <item android:color="#8B6BFF" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Glowing central voice orb -->
+    <path
+        android:pathData="M 54, 38 A 16,16 0 1,0 54, 70 A 16,16 0 1,0 54, 38">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="38"
+                android:startY="38"
+                android:endX="70"
+                android:endY="70"
+                android:type="linear">
+                <item android:color="#FFB36B" android:offset="0.0" />
+                <item android:color="#FF6B8B" android:offset="0.5" />
+                <item android:color="#8B6BFF" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner dynamic audio wave bars -->
+    <path
+        android:pathData="M 47,49 L 47,59 M 54,44 L 54,64 M 61,49 L 61,59"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+</vector>

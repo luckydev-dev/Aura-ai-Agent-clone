@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Aura</string>
+    <string name="accessibility_service_description">Aura Accessibility Service enables real-time screen awareness and system interaction.</string>
+    <string name="notification_listener_service_description">Aura Notification Listener allows the agent to read and reply to incoming messages.</string>
+    <string name="quick_settings_tile_label">Aura Voice</string>
+    <string name="aura_widget_title">Aura Voice Call</string>
+    <string name="aura_widget_tap_to_talk">Tap to talk to Aura</string>
+</resources>
