@@ -38,7 +38,7 @@ data class UserFactEntity(
     val key: String,
     val value: String,
     val category: String,
-    @ColumnInfo(defaultValue = "") val keyNormalized: String = key.trim().lowercase(Locale.ROOT),
+    @ColumnInfo(defaultValue = "''") val keyNormalized: String = key.trim().lowercase(Locale.ROOT),
     @ColumnInfo(defaultValue = "0") val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val updatedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val pinned: Boolean = false
