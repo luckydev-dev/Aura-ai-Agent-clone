@@ -31,18 +31,16 @@ jobs:
           rm -rf /tmp/Aura-Ai-Agent
           git clone --depth 1 https://github.com/luckydev-dev/Aura-Ai-Agent.git /tmp/Aura-Ai-Agent
 
-      - name: Copy source files into destination
+      - name: Copy source files but preserve destination workflow
         run: |
           set -euo pipefail
           rsync -a --delete \
-            --exclude='.git' \
+            --exclude='.git/' \
             --exclude='.github/workflows/main.yml' \
-            --exclude='/.git' \
+            --exclude='.github/workflows/' \
             /tmp/Aura-Ai-Agent/ ./
 
       - name: Commit and push changes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
