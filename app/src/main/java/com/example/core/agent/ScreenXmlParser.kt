@@ -17,7 +17,12 @@ data class ScreenNode(
     val index: Int = 0,
     val isEditable: Boolean = false,
     val isScrollable: Boolean = false,
-    val packageName: String = ""
+    val packageName: String = "",
+    val isSelected: Boolean = false,
+    val isChecked: Boolean = false,
+    val isEnabled: Boolean = true,
+    val isFocused: Boolean = false,
+    val isPassword: Boolean = false
 )
 
 object ScreenXmlParser {
