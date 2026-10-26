@@ -472,7 +472,7 @@ class ScreenAutomationTools(
 
         override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
             val goal = args["goal"]?.toString() ?: return ToolExecutionResult(false, "Missing goal")
-            val maxSteps = (args["max_steps"] as? Number)?.toInt()?.coerceIn(1, 40) ?: 20
+            val maxSteps = (args["max_steps"] as? Number)?.toInt()?.coerceIn(1, 80) ?: 40
 
             val apiKey = preferences.apiKey.first()
             val plannerModel = preferences.plannerModelName.first()
@@ -486,6 +486,8 @@ class ScreenAutomationTools(
 
             var taskOutcome = "Completed"
             var taskSuccess = false
+            var confirmationPrompt: String? = null
+            val taskDeadline = startTime + 300_000L
 
             try {
                 coroutineScope {
