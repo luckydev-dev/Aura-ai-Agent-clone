@@ -9,7 +9,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import android.view.accessibility.AccessibilityNodeInfo
+import android.util.Log
+import java.util.ArrayDeque
 import com.example.core.agent.ScreenNode
 import kotlinx.coroutines.*
 
@@ -22,20 +25,118 @@ class AuraAccessibilityService : AccessibilityService() {
         fun isRunning(): Boolean = instance != null
     }
 
+    data class ForegroundInfo(
+        val foregroundPackage: String,
+        val lastExternalPackage: String,
+        val recentExternalPackages: List<Pair<String, Long>>
+    )
+
+    @Volatile private var lastExternalPackage: String = ""
+    @Volatile private var foregroundPackage: String = ""
+    private val recentExternalPackages = ArrayDeque<Pair<String, Long>>()
+    private val ownPackage by lazy { packageName }
+    private val ignoredPackages = setOf(
+        "com.android.systemui",
+        "com.google.android.inputmethod.latin",
+        "com.android.inputmethod.latin",
+        "com.android.launcher",
+        "com.android.launcher3",
+        "com.google.android.apps.nexuslauncher"
+    )
+
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        runCatching {
+            val info = serviceInfo
+            info.flags = info.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            serviceInfo = info
+        }.onFailure { Log.e("Aura", "Could not enable interactive-window retrieval", it) }
+        updateForegroundFromWindows()
+        Log.i("Aura", "Accessibility service connected; foreground=" + foregroundPackage.ifBlank { "unknown" })
+        runCatching { com.example.AuraApplication.instance.overlayController.edgeLightingLifecycleChanged() }
+            .onFailure { Log.w("Aura", "Edge lighting lifecycle notification failed", it) }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         serviceScope.cancel()
-        instance = null
+        if (instance === this) instance = null
+        Log.i("Aura", "Accessibility service disconnected")
+        runCatching { com.example.AuraApplication.instance.overlayController.edgeLightingLifecycleChanged() }
+            .onFailure { Log.w("Aura", "Edge lighting lifecycle notification failed", it) }
+        super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val pkg = event?.packageName?.toString().orEmpty()
+        if (pkg.isNotBlank() && pkg != ownPackage && pkg !in ignoredPackages && !pkg.contains("inputmethod", true)) {
+            synchronized(recentExternalPackages) {
+                if (lastExternalPackage != pkg) {
+                    lastExternalPackage = pkg
+                    recentExternalPackages.addLast(pkg to System.currentTimeMillis())
+                    while (recentExternalPackages.size > 8) recentExternalPackages.removeFirst()
+                }
+            }
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+                event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            ) foregroundPackage = pkg
+        }
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+        ) updateForegroundFromWindows()
+    }
+
+    fun getForegroundInfo(): ForegroundInfo {
+        updateForegroundFromWindows()
+        return ForegroundInfo(
+            foregroundPackage = foregroundPackage,
+            lastExternalPackage = lastExternalPackage,
+            recentExternalPackages = synchronized(recentExternalPackages) { recentExternalPackages.toList() }
+        )
+    }
+
+    private fun updateForegroundFromWindows() {
+        val candidate = runCatching {
+            windows?.asSequence()
+                ?.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                ?.sortedByDescending { it.layer }
+                ?.mapNotNull { it.root?.packageName?.toString() }
+                ?.firstOrNull { it.isNotBlank() && it != ownPackage && it !in ignoredPackages && !it.contains("inputmethod", true) }
+        }.onFailure { Log.w("Aura", "Unable to inspect accessibility windows", it) }.getOrNull()
+        if (!candidate.isNullOrBlank()) {
+            foregroundPackage = candidate
+            if (candidate != lastExternalPackage) {
+                lastExternalPackage = candidate
+                synchronized(recentExternalPackages) {
+                    recentExternalPackages.addLast(candidate to System.currentTimeMillis())
+                    while (recentExternalPackages.size > 8) recentExternalPackages.removeFirst()
+                }
+            }
+        }
+    }
+
+    private fun selectedExternalRoot(): AccessibilityNodeInfo? {
+        updateForegroundFromWindows()
+        val externalWindow = runCatching {
+            windows?.asSequence()
+                ?.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                ?.sortedByDescending { it.layer }
+                ?.firstOrNull { win ->
+                    val pkg = win.root?.packageName?.toString().orEmpty()
+                    pkg.isNotBlank() && pkg != ownPackage && pkg !in ignoredPackages && !pkg.contains("inputmethod", true)
+                }
+        }.onFailure { Log.w("Aura", "Unable to select external application window", it) }.getOrNull()
+        val root = externalWindow?.root ?: rootInActiveWindow?.takeIf {
+            it.packageName?.toString() != ownPackage
+        }
+        if (root == null && foregroundPackage == ownPackage) {
+            Log.w("Aura", "Aura is the top window; refusing to return Aura controls as the external screen")
+        }
+        return root
+    }
 
     override fun onInterrupt() {}
 
@@ -43,12 +144,12 @@ class AuraAccessibilityService : AccessibilityService() {
      * Finds nodes by text across active window.
      */
     fun findNodesByText(text: String): List<AccessibilityNodeInfo> {
-        val root = rootInActiveWindow ?: return emptyList()
+        val root = selectedExternalRoot() ?: return emptyList()
         return root.findAccessibilityNodeInfosByText(text) ?: emptyList()
     }
 
     fun findNodeByQuery(query: String): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
+        val root = selectedExternalRoot() ?: return null
         fun search(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
             if (node == null) return null
             val t = node.text?.toString() ?: ""
@@ -91,7 +192,7 @@ class AuraAccessibilityService : AccessibilityService() {
             val isFocusable = node.isFocusable
 
             // Include interactive or informative nodes, skip 0-size invisible bounds
-            if (rect.width() > 0 && rect.height() > 0) {
+            if (pkg != ownPackage && pkg != "com.android.systemui" && rect.width() > 0 && rect.height() > 0) {
                 if (text.isNotBlank() || desc.isNotBlank() || viewId.isNotBlank() || isClickable || isEditable || isScrollable) {
                     nodes.add(
                         ScreenNode(
@@ -119,6 +220,10 @@ class AuraAccessibilityService : AccessibilityService() {
         }
 
         traverse(root)
+        if (nodes.isEmpty()) {
+            val info = getForegroundInfo()
+            Log.w("Aura", "External screen tree empty; foreground=" + info.foregroundPackage + "; lastExternal=" + info.lastExternalPackage)
+        }
         return nodes
     }
 
