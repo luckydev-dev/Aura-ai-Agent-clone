@@ -24,4 +24,4 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Build and unit test
-        run: ./gradlew --no-daemon assembleDebug test
+        run: bash ./gradlew --no-daemon assembleDebug test
