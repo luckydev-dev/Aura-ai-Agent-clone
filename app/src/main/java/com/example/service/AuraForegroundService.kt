@@ -167,7 +167,7 @@ class AuraForegroundService : Service() {
 
         try {
             preferences = AuraPreferences(this)
-            memoryRepository = MemoryRepository(this)
+            memoryRepository = com.example.AuraApplication.instance.memoryRepository
             rootManager = RootManager(this)
             permissionDoctor = PermissionDoctor(this, rootManager)
             appInventory = AppInventory(this, rootManager)
