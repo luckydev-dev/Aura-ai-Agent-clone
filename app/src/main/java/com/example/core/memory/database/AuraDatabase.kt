@@ -53,13 +53,13 @@ interface ActionLogDao {
 
 @Dao
 interface UserFactDao {
-    @Query("SELECT * FROM user_facts ORDER BY category ASC, `key` ASC")
+    @Query("SELECT * FROM user_facts ORDER BY pinned DESC, category ASC, `key` ASC")
     fun getAll(): Flow<List<UserFactEntity>>
 
     @Query("SELECT * FROM user_facts WHERE `key` = :key LIMIT 1")
     suspend fun findByKey(key: String): UserFactEntity?
 
-    @Query("SELECT * FROM user_facts WHERE LOWER(TRIM(`key`)) = LOWER(TRIM(:key)) ORDER BY id DESC LIMIT 1")
+    @Query("SELECT * FROM user_facts WHERE keyNormalized = LOWER(TRIM(:key)) LIMIT 1")
     suspend fun findByKeyNormalized(key: String): UserFactEntity?
 
     @Query("SELECT * FROM user_facts WHERE id = :id LIMIT 1")
