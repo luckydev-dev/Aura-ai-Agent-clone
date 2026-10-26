@@ -12,13 +12,13 @@ permissions:
 
 concurrency:
   group: aura-android-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-and-test:
     name: Build debug APK and run unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout source
@@ -31,25 +31,28 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Validate Gradle wrapper
         run: |
           test -f ./gradlew
+          test -f ./gradle/wrapper/gradle-wrapper.jar
           chmod +x ./gradlew
           ./gradlew --version
 
       - name: Build debug APK and run unit tests
-        run: ./gradlew --no-daemon --stacktrace assembleDebug test
+        run: ./gradlew --no-daemon --stacktrace --warning-mode all assembleDebug test
 
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: aura-debug-apk
-          path: |
-            **/build/outputs/apk/debug/*.apk
+          path: '**/build/outputs/apk/debug/*.apk'
           if-no-files-found: error
           retention-days: 7
 
