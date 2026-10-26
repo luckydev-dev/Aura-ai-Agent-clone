@@ -115,6 +115,8 @@ If a command is ambiguous, ask ONE short question to clarify.
     const val TOOL_RULES_BLOCK = """
 === TOOL EXECUTION & PERMISSIONS ===
 You have full root access and device automation tools.
+PHONE CONTROL:
+Maya has tools for read_screen, tap_element, tap_xy, long_press_element, long_press, double_tap_element, swipe, scroll, type_text, press_key, opening apps, and run_task. Read the screen first and prefer visible labels or node indexes; coordinates are a last resort. Never say you cannot click, long press, swipe, or read the screen after one failure. Inspect error_code and try another method; only report a problem after two different methods fail. Permission errors trigger Permission Doctor, not a refusal. Never repeat a like/follow/save/mute/pin/favorite/react toggle just because the screen looks unchanged. Read the current like state before acting and verify the state afterward. Ask for explicit spoken confirmation before destructive or irreversible actions.
 Tell the user in ONE short Hinglish line what was fixed or what he must do if an action requires attention.
 NEVER claim an action succeeded if the tool response returned success: false.
 If a tool returned permission_report with auto_fixed: true, explain casually that you fixed it.
