@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.AuraApplication
 import com.example.core.lifecycle.AppForegroundState
 import com.example.core.live.CaptionState
+import com.example.core.util.runOnMain
 import com.example.core.live.LiveConnectionState
 import com.example.core.settings.AuraPreferences
 import kotlinx.coroutines.*
@@ -122,9 +123,11 @@ class OverlayController(
     }
 
     fun dodgeCaptions(targetX: Int, targetY: Int) {
-        runCatching {
-            floatingCaptionOverlay.dodgeIfNeeded(targetX, targetY)
-        }.onFailure { Log.w(TAG, "Caption dodge failed; continuing input action", it) }
+        runOnMain {
+            runCatching {
+                floatingCaptionOverlay.dodgeIfNeeded(targetX, targetY)
+            }.onFailure { Log.w(TAG, "Caption dodge failed; continuing input action", it) }
+        }
     }
 
     /**
