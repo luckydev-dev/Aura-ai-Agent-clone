@@ -8,6 +8,7 @@ import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import com.example.core.lifecycle.AppForegroundState
 import com.example.core.live.LiveDiagnostics
+import com.example.core.memory.MemoryRepository
 import com.example.core.settings.AuraPreferences
 import com.example.ui.overlay.OverlayManager
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,7 @@ import java.util.Locale
 class AuraApplication : Application(), Application.ActivityLifecycleCallbacks {
 
     val liveDiagnostics = LiveDiagnostics()
+    val memoryRepository by lazy { MemoryRepository(this) }
 
     val rootManager by lazy { com.example.core.root.RootManager(this) }
     val inputController by lazy { com.example.core.input.InputController.getInstance(this, rootManager) }
