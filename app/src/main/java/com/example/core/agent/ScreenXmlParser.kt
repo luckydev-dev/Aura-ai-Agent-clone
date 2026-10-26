@@ -71,7 +71,7 @@ object ScreenXmlParser {
                 eventType = parser.next()
             }
         } catch (e: Throwable) {
-            android.util.Log.w("Aura", "XmlPullParser failed, falling back to regex: ${e.message}")
+            android.util.Log.w("Aura", "XmlPullParser failed, falling back to regex: ${e.message}", e)
             return parseFallback(xmlContent)
         }
 
