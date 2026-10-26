@@ -41,6 +41,8 @@ jobs:
             /tmp/Aura-Ai-Agent/ ./
 
       - name: Commit and push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -53,4 +55,4 @@ jobs:
           fi
 
           git commit -m "Sync Aura-Ai-Agent source"
-          git push origin HEAD:main
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/luckydev-dev/Aura-ai-Agent-clone.git" HEAD:main
