@@ -83,18 +83,30 @@ class MemoryRepository(context: Context) {
     fun getAllFacts(): Flow<List<UserFactEntity>> = userFactDao.getAll()
 
     suspend fun saveFact(key: String, value: String, category: String = "fact") {
-        userFactDao.insert(
-            UserFactEntity(
-                key = key.trim(),
-                value = value.trim(),
-                category = category.trim()
-            )
-        )
+        val cleanKey = key.trim()
+        val cleanValue = value.trim()
+        require(cleanKey.isNotBlank() && cleanValue.isNotBlank()) { "Fact key and value are required" }
+        require(cleanKey.length <= 120) { "Fact key is too long (max 120 characters)" }
+        require(cleanValue.length <= 8000) { "Fact value is too long (max 8000 characters)" }
+        val existing = userFactDao.findByKeyNormalized(cleanKey)
+        userFactDao.insert(UserFactEntity(id = existing?.id ?: 0, key = cleanKey, value = cleanValue, category = category.trim().lowercase().ifBlank { "fact" }))
     }
 
-    suspend fun findFact(key: String): String? {
-        return userFactDao.findByKey(key.trim())?.value
+    suspend fun updateFact(id: Long, key: String, value: String, category: String = "fact") {
+        val cleanKey = key.trim()
+        val cleanValue = value.trim()
+        require(cleanKey.isNotBlank() && cleanValue.isNotBlank()) { "Fact key and value are required" }
+        require(cleanKey.length <= 120) { "Fact key is too long (max 120 characters)" }
+        require(cleanValue.length <= 8000) { "Fact value is too long (max 8000 characters)" }
+        val conflict = userFactDao.findByKeyNormalized(cleanKey)
+        require(conflict == null || conflict.id == id) { "A fact with this key already exists" }
+        val existing = userFactDao.getById(id) ?: return
+        userFactDao.insert(existing.copy(key = cleanKey, value = cleanValue, category = category.trim().lowercase().ifBlank { "fact" }))
     }
+
+    suspend fun getFactById(id: Long): UserFactEntity? = userFactDao.getById(id)
+
+    suspend fun findFact(key: String): String? = userFactDao.findByKeyNormalized(key.trim())?.value
 
     suspend fun deleteFact(id: Long) = userFactDao.deleteById(id)
     suspend fun clearAllFacts() = userFactDao.clearAll()
