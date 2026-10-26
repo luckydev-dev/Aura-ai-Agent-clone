@@ -25,9 +25,17 @@ class AuraAccessibilityService : AccessibilityService() {
         fun isRunning(): Boolean = instance != null
     }
 
-    data class ForegroundInfo(val foregroundPackage: String, val lastExternalPackage: String, val recentExternalPackages: List<Pair<String, Long>>)
+    data class ForegroundInfo(
+        val foregroundPackage: String,
+        val lastExternalPackage: String,
+        val recentExternalPackages: List<Pair<String, Long>>,
+        val topApplicationPackage: String,
+        val isAuraOnTop: Boolean
+    )
     @Volatile private var lastExternalPackage = ""
     @Volatile private var foregroundPackage = ""
+    @Volatile private var topApplicationPackage = ""
+    @Volatile private var isAuraOnTop = false
     private val recentExternalPackages = ArrayDeque<Pair<String, Long>>()
     private val ownPackage by lazy { packageName }
     private val ignoredPackages = setOf("com.android.systemui", "com.google.android.inputmethod.latin", "com.android.inputmethod.latin", "com.android.launcher", "com.android.launcher3", "com.google.android.apps.nexuslauncher")
@@ -75,17 +83,35 @@ class AuraAccessibilityService : AccessibilityService() {
 
     fun getForegroundInfo(): ForegroundInfo {
         updateForegroundFromWindows()
-        return ForegroundInfo(foregroundPackage, lastExternalPackage, synchronized(recentExternalPackages) { recentExternalPackages.toList() })
+        return ForegroundInfo(
+            foregroundPackage = foregroundPackage,
+            lastExternalPackage = lastExternalPackage,
+            recentExternalPackages = synchronized(recentExternalPackages) { recentExternalPackages.toList() },
+            topApplicationPackage = topApplicationPackage,
+            isAuraOnTop = isAuraOnTop
+        )
     }
 
     private fun updateForegroundFromWindows() {
-        val candidate = runCatching {
+        val snapshot = runCatching {
             windows?.asSequence()
                 ?.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
                 ?.sortedByDescending { it.layer }
-                ?.mapNotNull { it.root?.packageName?.toString() }
-                ?.firstOrNull { it.isNotBlank() && it != ownPackage && it !in ignoredPackages && !it.contains("inputmethod", true) }
-        }.onFailure { Log.w("Aura", "Could not inspect accessibility windows", it) }.getOrNull()
+                ?.mapNotNull { window ->
+                    val pkg = window.root?.packageName?.toString().orEmpty()
+                    if (pkg.isBlank()) null else pkg
+                }
+                ?.toList()
+                .orEmpty()
+        }.onFailure { Log.w("Aura", "Could not inspect accessibility windows", it) }.getOrDefault(emptyList())
+
+        val top = snapshot.firstOrNull().orEmpty()
+        topApplicationPackage = top
+        isAuraOnTop = top == ownPackage
+
+        val candidate = snapshot.firstOrNull { pkg ->
+            pkg != ownPackage && pkg !in ignoredPackages && !pkg.contains("inputmethod", true)
+        }
         if (!candidate.isNullOrBlank()) {
             foregroundPackage = candidate
             if (candidate != lastExternalPackage) {
@@ -100,6 +126,10 @@ class AuraAccessibilityService : AccessibilityService() {
 
     private fun selectedExternalRoot(): AccessibilityNodeInfo? {
         updateForegroundFromWindows()
+        if (isAuraOnTop) {
+            Log.w("Aura", "Aura is top application window; refusing to return Aura controls as the external screen")
+            return null
+        }
         val external = runCatching {
             windows?.asSequence()
                 ?.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
@@ -109,8 +139,10 @@ class AuraAccessibilityService : AccessibilityService() {
                     pkg.isNotBlank() && pkg != ownPackage && pkg !in ignoredPackages && !pkg.contains("inputmethod", true)
                 }
         }.onFailure { Log.w("Aura", "Could not select external window", it) }.getOrNull()
-        val root = external?.root ?: rootInActiveWindow?.takeIf { it.packageName?.toString() != ownPackage }
-        if (root == null && foregroundPackage == ownPackage) Log.w("Aura", "Aura is foreground; refusing to return Aura UI as external screen")
+        val root = external?.root ?: rootInActiveWindow?.takeIf {
+            it.packageName?.toString() != ownPackage && !isAuraOnTop
+        }
+        if (root == null) Log.w("Aura", "No readable external application window; top=" + topApplicationPackage)
         return root
     }
 
