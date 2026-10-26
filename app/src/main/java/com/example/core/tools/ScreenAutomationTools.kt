@@ -458,6 +458,35 @@ class ScreenAutomationTools(
         }
     }
 
+    private fun confirmationPromptForGoal(goal: String): String? {
+        val phrases = listOf(
+            "transfer money", "send money", "send payment", "make a payment", "confirm payment",
+            "pay now", "submit payment", "delete account", "factory reset", "erase all data",
+            "wipe device", "place order", "purchase", "buy now"
+        )
+        val text = goal.lowercase(Locale.ROOT)
+        val hasIrreversibleIntent = phrases.any { phrase ->
+            Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(phrase) + "(?![\\p{L}\\p{N}])").containsMatchIn(text)
+        }
+        if (!hasIrreversibleIntent) return null
+        return "This task may perform an irreversible financial or account action. Confirm karun? Say yes explicitly before I proceed."
+    }
+
+    private fun confirmationRequired(prompt: String): ToolExecutionResult {
+        val payload = mapOf(
+            "success" to false,
+            "error_code" to "CONFIRMATION_REQUIRED",
+            "message" to prompt,
+            "suggested_next" to "Ask the user for an explicit yes before starting this task again."
+        )
+        return ToolExecutionResult(
+            success = false,
+            output = JSONObject(payload).toString(),
+            data = payload,
+            requiresConfirmation = true,
+            confirmationPrompt = prompt
+        )
+    }
     val runTaskTool = object : Tool {
         override val name = "run_task"
         override val description = "Executes an autonomous multi-step Android phone task using Gemini observation and planning."
@@ -472,6 +501,7 @@ class ScreenAutomationTools(
 
         override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
             val goal = args["goal"]?.toString() ?: return ToolExecutionResult(false, "Missing goal")
+            confirmationPromptForGoal(goal)?.let { prompt -> return confirmationRequired(prompt) }
             val maxSteps = (args["max_steps"] as? Number)?.toInt()?.coerceIn(1, 80) ?: 40
 
             val apiKey = preferences.apiKey.first()
