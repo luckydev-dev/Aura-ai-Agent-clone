@@ -1,25 +1,58 @@
-name: Clone Aura AI Agent
+name: Sync Aura AI Agent
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aura-ai-agent-sync
+  cancel-in-progress: false
 
 jobs:
-  clone-target-repo:
+  sync-source:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout current repository
+      - name: Checkout destination repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Clone Aura-Ai-Agent into temp folder only
+      - name: Clone source repository
         run: |
+          set -euo pipefail
           rm -rf /tmp/Aura-Ai-Agent
-          git clone https://github.com/luckydev-dev/Aura-Ai-Agent.git /tmp/Aura-Ai-Agent
+          git clone --depth 1 https://github.com/luckydev-dev/Aura-Ai-Agent.git /tmp/Aura-Ai-Agent
 
-      - name: Show cloned repo contents
+      - name: Copy source files into destination
         run: |
-          ls -la /tmp/Aura-Ai-Agent
-          find /tmp/Aura-Ai-Agent -maxdepth 2 -type f | head
+          set -euo pipefail
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='.github/workflows/main.yml' \
+            --exclude='/.git' \
+            /tmp/Aura-Ai-Agent/ ./
+
+      - name: Commit and push changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Source is already up to date; no commit needed."
+            exit 0
+          fi
+
+          git commit -m "Sync Aura-Ai-Agent source"
+          git push origin HEAD:main
