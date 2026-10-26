@@ -8,6 +8,7 @@ import com.example.core.agent.*
 import com.example.core.memory.MemoryRepository
 import com.example.core.memory.database.TaskExecutionEntity
 import com.example.core.memory.database.TaskStepEntity
+import com.example.core.memory.database.TaskStepEntity
 import com.example.core.root.RootManager
 import com.example.core.settings.AuraPreferences
 import com.example.service.AuraAccessibilityService
@@ -85,6 +86,13 @@ class ScreenAutomationTools(
         isTaskCancelRequested = true
         activeTaskJob?.cancel()
         activeTaskJob = null
+    }
+
+    private fun screenSignature(nodes: List<ScreenNode>): String {
+        val material = nodes.joinToString("|") {
+            "${it.packageName}:${it.text}:${it.contentDescription}:${it.resourceId}:${it.bounds}"
+        }
+        return "count=${nodes.size};hash=${material.hashCode().toString(16)}"
     }
 
     suspend fun getScreenNodes(): List<ScreenNode> {
@@ -602,17 +610,19 @@ class ScreenAutomationTools(
                         }
                         stepsJsonArray.put(stepLogObj)
 
-                        // 6. Execute decided action
+                        // 6. Execute decided action and track whether it was actually dispatched.
                         var executionResultMsg = "Done"
-                        var screenSig = nodes.take(4).joinToString { it.text + it.bounds }
+                        val screenSig = screenSignature(nodes)
+                        var actionDispatched = false
+                        var stepVerified = false
 
                         when (decision.action) {
                             "tap_index" -> {
                                 val idx = (decision.params["index"] as? Number)?.toInt() ?: 1
                                 val targetNode = nodes.find { it.index == idx }
                                 if (targetNode != null) {
-                                    inputController.tap(targetNode.centerX.toFloat(), targetNode.centerY.toFloat(), "Tap #${targetNode.index}")
-                                    executionResultMsg = "Tapped node #$idx (${targetNode.text})"
+                                    actionDispatched = inputController.tap(targetNode.centerX.toFloat(), targetNode.centerY.toFloat(), "Tap #${targetNode.index}")
+                                    executionResultMsg = if (actionDispatched) "Tapped node #$idx (${targetNode.text})" else "Tap dispatch failed for node #$idx"
                                 } else {
                                     executionResultMsg = "Node #$idx not found"
                                 }
@@ -624,8 +634,8 @@ class ScreenAutomationTools(
                                     it.contentDescription.contains(query, ignoreCase = true)
                                 }
                                 if (targetNode != null) {
-                                    inputController.tap(targetNode.centerX.toFloat(), targetNode.centerY.toFloat(), "Tap $query")
-                                    executionResultMsg = "Tapped '$query' at (${targetNode.centerX}, ${targetNode.centerY})"
+                                    actionDispatched = inputController.tap(targetNode.centerX.toFloat(), targetNode.centerY.toFloat(), "Tap $query")
+                                    executionResultMsg = if (actionDispatched) "Tapped '$query' at (${targetNode.centerX}, ${targetNode.centerY})" else "Tap dispatch failed for '$query'"
                                 } else {
                                     executionResultMsg = "Text '$query' not found"
                                 }
@@ -633,54 +643,58 @@ class ScreenAutomationTools(
                             "tap_xy" -> {
                                 val x = (decision.params["x"] as? Number)?.toFloat() ?: 540f
                                 val y = (decision.params["y"] as? Number)?.toFloat() ?: 1200f
-                                inputController.tap(x, y, "Tap ($x, $y)")
-                                executionResultMsg = "Tapped ($x, $y)"
+                                actionDispatched = inputController.tap(x, y, "Tap ($x, $y)")
+                                executionResultMsg = if (actionDispatched) "Tapped ($x, $y)" else "Tap dispatch failed at ($x, $y)"
                             }
                             "long_press" -> {
                                 val x = (decision.params["x"] as? Number)?.toFloat() ?: 540f
                                 val y = (decision.params["y"] as? Number)?.toFloat() ?: 1200f
-                                inputController.longPress(x, y, 1000L, "Long press")
-                                executionResultMsg = "Long pressed ($x, $y)"
+                                actionDispatched = inputController.longPress(x, y, 1000L, "Long press")
+                                executionResultMsg = if (actionDispatched) "Long pressed ($x, $y)" else "Long press dispatch failed at ($x, $y)"
                             }
                             "type_text" -> {
                                 val text = decision.params["text"]?.toString() ?: ""
                                 val res = typeTextTool.execute(mapOf("text" to text))
+                                actionDispatched = res.success
                                 executionResultMsg = res.output
                             }
                             "scroll" -> {
                                 val dir = decision.params["direction"]?.toString() ?: "down"
-                                scrollTool.execute(mapOf("direction" to dir))
-                                executionResultMsg = "Scrolled $dir"
+                                val scrollResult = scrollTool.execute(mapOf("direction" to dir))
+                                actionDispatched = scrollResult.success
+                                executionResultMsg = scrollResult.output
                             }
                             "swipe" -> {
                                 val x1 = (decision.params["x1"] as? Number)?.toFloat() ?: 540f
                                 val y1 = (decision.params["y1"] as? Number)?.toFloat() ?: 1800f
                                 val x2 = (decision.params["x2"] as? Number)?.toFloat() ?: 540f
                                 val y2 = (decision.params["y2"] as? Number)?.toFloat() ?: 600f
-                                inputController.swipe(x1, y1, x2, y2, 300L, "Swipe")
-                                executionResultMsg = "Swiped ($x1, $y1) to ($x2, $y2)"
+                                actionDispatched = inputController.swipe(x1, y1, x2, y2, 300L, "Swipe")
+                                executionResultMsg = if (actionDispatched) "Swiped ($x1, $y1) to ($x2, $y2)" else "Swipe dispatch failed"
                             }
                             "back" -> {
-                                inputController.pressKey(4, "Back")
-                                executionResultMsg = "Pressed back"
+                                actionDispatched = inputController.pressKey(4, "Back")
+                                executionResultMsg = if (actionDispatched) "Pressed back" else "Back key dispatch failed"
                             }
                             "home" -> {
-                                inputController.pressKey(3, "Home")
-                                executionResultMsg = "Pressed home"
+                                actionDispatched = inputController.pressKey(3, "Home")
+                                executionResultMsg = if (actionDispatched) "Pressed home" else "Home key dispatch failed"
                             }
                             "recents" -> {
-                                inputController.pressKey(187, "Recents")
-                                executionResultMsg = "Opened recents"
+                                actionDispatched = inputController.pressKey(187, "Recents")
+                                executionResultMsg = if (actionDispatched) "Opened recents" else "Recents key dispatch failed"
                             }
                             "open_app" -> {
                                 val pkg = decision.params["package_name"]?.toString()
                                     ?: decision.params["app_name"]?.toString() ?: ""
                                 val launched = appInventory.openApp(pkg)
+                                actionDispatched = launched
                                 executionResultMsg = if (launched) "Opened $pkg" else "Could not open $pkg"
                             }
                             "wait" -> {
                                 val ms = (decision.params["ms"] as? Number)?.toLong() ?: 1000L
                                 delay(ms)
+                                actionDispatched = true
                                 executionResultMsg = "Waited ${ms}ms"
                             }
                             "ask_user" -> {
@@ -706,17 +720,46 @@ class ScreenAutomationTools(
                             }
                         }
 
+                        delay(350L)
+                        val nodesAfter = waitForUiIdle(maxWaitMs = 2500L, pollIntervalMs = 250L)
+                        val signatureAfter = screenSignature(nodesAfter)
+                        stepVerified = actionDispatched && (
+                            signatureAfter != screenSig ||
+                            decision.action in listOf("wait", "back", "home", "recents", "open_app")
+                        )
+                        if (decision.action in listOf("tap_index", "tap_text", "tap_xy") && signatureAfter == screenSig) {
+                            stepVerified = false
+                        }
+                        stepLogObj.put("result", executionResultMsg)
+                        stepLogObj.put("verified", stepVerified)
+                        stepLogObj.put("screen_signature_after", signatureAfter)
+                        try {
+                            memoryRepository.logTaskStep(
+                                TaskStepEntity(
+                                    taskId = taskId,
+                                    step = step,
+                                    thought = decision.thought,
+                                    action = decision.action,
+                                    paramsJson = JSONObject(decision.params).toString(),
+                                    result = executionResultMsg,
+                                    verified = stepVerified,
+                                    screenSignature = signatureAfter
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to persist task step $step", e)
+                        }
                         history.add(
                             AgentActionHistory(
                                 stepIndex = step,
                                 action = "${decision.action}: ${decision.thought}",
                                 target = decision.params.toString(),
-                                result = executionResultMsg,
-                                screenSignature = screenSig
+                                result = executionResultMsg + if (stepVerified) " [verified]" else " [unverified]",
+                                screenSignature = signatureAfter
                             )
                         )
 
-                        delay(600L) // Wait for action to take effect
+                        delay(250L) // Give the UI a short settling period before the next observation
                     }
 
                     taskOutcome = "Task reached maximum step limit ($maxSteps) without full completion."
