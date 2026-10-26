@@ -70,7 +70,7 @@ class AgentCursorOverlay(
     var showRipple: Boolean = true
         set(value) { field = value; runOnMain { cursorView?.showRipple = value } }
     var showActionLabel: Boolean = true
-        set(value) { field = value; runOnMain { cursorView?.showActionLabel = value }
+        set(value) { field = value; runOnMain { cursorView?.showActionLabel = value } }
     var showDuringUnlock: Boolean = false
 
     init {
