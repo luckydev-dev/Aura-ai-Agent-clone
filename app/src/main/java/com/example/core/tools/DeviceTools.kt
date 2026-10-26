@@ -6,6 +6,7 @@ import com.example.core.root.RootManager
 import com.example.core.settings.AuraPreferences
 import com.example.service.AuraAccessibilityService
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 class DeviceTools(
