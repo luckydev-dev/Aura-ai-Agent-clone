@@ -66,59 +66,79 @@ class DeviceTools(
 
     val setNetworkTypeTool = object : Tool {
         override val name = "set_network_type"
-        override val description = "Sets cellular network type/mode using root access (e.g., '4g_only' / 'lte_only', '5g_only' / 'nr_only', '5g_auto', '4g_auto', '3g_only', '2g_only')."
-        override val parametersSchema = mapOf(
-            "type" to "object",
-            "properties" to mapOf(
-                "network_type" to mapOf(
-                    "type" to "string",
-                    "description" to "The target cellular network type: '4g_only' (or 'lte_only'), '5g_only' (or 'nr_only'), '5g_auto', '4g_auto', '3g_only', '2g_only'."
-                )
-            ),
-            "required" to listOf("network_type")
-        )
-
+        override val description = "Changes cellular preferred network mode using only advertised commands or a legacy settings fallback. Reports success only when the saved mode and current radio technology verify the request."
+        override val parametersSchema = mapOf("type" to "object", "properties" to mapOf(
+            "network_type" to mapOf("type" to "string", "description" to "4g_only, 5g_only, 5g_auto, 4g_auto, 3g_only, or 2g_only"),
+            "sim_slot" to mapOf("type" to "integer", "description" to "Optional SIM slot index; 0 is SIM 1.")
+        ), "required" to listOf("network_type"))
         override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
-            val rawType = args["network_type"]?.toString()?.lowercase(java.util.Locale.ROOT)?.trim() ?: ""
-            val (modeCode, label) = when {
-                rawType.contains("5g_only") || rawType.contains("nr_only") || rawType.contains("only 5g") || rawType.contains("only nr") || rawType.contains("5g single") -> Pair(20, "5G NR Only")
-                rawType.contains("4g_only") || rawType.contains("lte_only") || rawType.contains("only 4g") || rawType.contains("only lte") || rawType.contains("4g single") -> Pair(11, "4G LTE Only")
-                rawType.contains("5g") -> Pair(33, "5G / 4G Auto")
-                rawType.contains("4g") || rawType.contains("lte") -> Pair(9, "4G / 3G / 2G Auto")
-                rawType.contains("3g") -> Pair(2, "3G Only")
-                rawType.contains("2g") -> Pair(1, "2G Only")
-                else -> Pair(11, "4G LTE Only")
+            val requested = args["network_type"]?.toString()?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
+            val suffix = (args["sim_slot"] as? Number)?.toInt()?.coerceIn(0, 3)?.toString().orEmpty()
+            val pair = when (requested) {
+                "4g_only", "lte_only" -> 11 to "4G LTE only"
+                "5g_only", "nr_only" -> 20 to "5G NR only"
+                "5g_auto" -> 33 to "5G/4G auto"
+                "4g_auto" -> 9 to "4G/3G/2G auto"
+                "3g_only" -> 2 to "3G only"
+                "2g_only" -> 1 to "2G only"
+                else -> return ToolExecutionResult(false, "error_code=NETWORK_MODE_NOT_APPLIED; unsupported network_type.")
             }
-
-            val commands = listOf(
-                "cmd phone set-preferred-network-type $modeCode",
-                "cmd phone set-preferred-network-type 0 $modeCode",
-                "cmd phone set-preferred-network-type 1 $modeCode",
-                "settings put global preferred_network_mode $modeCode",
-                "settings put global preferred_network_mode0 $modeCode",
-                "settings put global preferred_network_mode1 $modeCode",
-                "settings put global user_preferred_network_mode $modeCode",
-                "setprop persist.telephony.default_network $modeCode,$modeCode",
-                "setprop persist.radio.prefernetwork $modeCode",
-                "service call phone 80 i32 0 i32 $modeCode",
-                "service call phone 80 i32 1 i32 $modeCode",
-                "service call phone 83 i32 0 i32 $modeCode",
-                "service call phone 83 i32 1 i32 $modeCode"
-            )
-
-            val rootCmd = commands.joinToString(" ; ")
-            val res = rootManager.execute(rootCmd)
-
-            // Pulse telephony refresh
-            rootManager.execute("cmd connectivity radio wifi || true")
-
-            return ToolExecutionResult(
-                success = true,
-                output = "Cellular network mode set to $label (Mode Code $modeCode) via root."
-            )
+            val code = pair.first
+            val label = pair.second
+            val help = rootManager.execute("cmd phone help")
+            val helpText = (help.stdout + " " + help.stderr).lowercase(java.util.Locale.ROOT)
+            val attempts = mutableListOf<String>()
+            var stored = false
+            var method = "none"
+            var readback = ""
+            var reason = "No verifiable network-mode command was available."
+            if (help.success && helpText.contains("set-allowed-network-types-for-users") && helpText.contains("get-allowed-network-types-for-users")) {
+                attempts.add("cmd phone advertises allowed-network-type commands; no unverified syntax or bitmask guessed")
+                reason = "The device advertises allowed-network commands, but its help output does not expose a safe slot-scoped invocation form."
+            } else {
+                val key = "preferred_network_mode" + suffix
+                val write = rootManager.execute("settings put global " + key + " " + code)
+                val read = rootManager.execute("settings get global " + key)
+                readback = read.stdout.trim()
+                attempts.add("settings put global " + key + " " + code + " success=" + write.success)
+                if (write.success && readback == code.toString()) {
+                    rootManager.execute("svc data disable")
+                    delay(500L)
+                    rootManager.execute("svc data enable")
+                    delay(1200L)
+                    stored = true
+                    method = "legacy settings read-back"
+                    reason = "Stored preferred-network value matched; modem technology still needs verification."
+                } else {
+                    reason = "Preferred-network value did not read back as requested."
+                }
+            }
+            val radioResult = rootManager.execute("getprop gsm.network.type; dumpsys telephony.registry | grep -i -E 'mDataNetworkType|dataNetworkType|NetworkRegistrationInfo' | head -n 12")
+            val radio = radioResult.stdout.trim()
+            val radioOk = when (requested) {
+                "4g_only", "lte_only" -> Regex("(?i)\\b(LTE|LTE_CA)\\b").containsMatchIn(radio)
+                "5g_only", "nr_only" -> Regex("(?i)\\b(NR|NR_SA|NR_NSA)\\b").containsMatchIn(radio)
+                else -> radio.isNotBlank()
+            }
+            val verified = stored && readback == code.toString() && radioOk
+            val output = "Requested=" + label + "; success=" + verified + "; method=" + method + "; readback=" + readback.ifBlank { "unavailable" } + "; radio=" + radio.ifBlank { "unavailable" } + "; attempts=" + attempts.joinToString(" | ") + "; reason=" + reason + if (verified) "" else "; error_code=NETWORK_MODE_NOT_APPLIED"
+            return ToolExecutionResult(verified, output)
         }
     }
 
+    val getNetworkModeTool = object : Tool {
+        override val name = "get_network_mode"
+        override val description = "Reads global and per-SIM preferred network values plus the modem-reported radio technology."
+        override val parametersSchema = mapOf("type" to "object", "properties" to emptyMap<String, Any>())
+        override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
+            val def = rootManager.execute("settings get global preferred_network_mode")
+            val sim0 = rootManager.execute("settings get global preferred_network_mode0")
+            val sim1 = rootManager.execute("settings get global preferred_network_mode1")
+            val radio = rootManager.execute("getprop gsm.network.type; dumpsys telephony.registry | grep -i -E 'mDataNetworkType|dataNetworkType|NetworkRegistrationInfo' | head -n 12")
+            val output = "default=" + def.stdout.trim() + "; sim0=" + sim0.stdout.trim() + "; sim1=" + sim1.stdout.trim() + "; radio=" + radio.stdout.trim()
+            return ToolExecutionResult(def.success || sim0.success || sim1.success || radio.success, output)
+        }
+    }
     val setAirplaneModeTool = object : Tool {
         override val name = "set_airplane_mode"
         override val description = "Turns airplane mode on or off."
@@ -557,7 +577,7 @@ class DeviceTools(
     }
 
     fun getAllTools(): List<Tool> = listOf(
-        setWifiTool, setBluetoothTool, setMobileDataTool, setNetworkTypeTool, setAirplaneModeTool,
+        setWifiTool, setBluetoothTool, setMobileDataTool, setNetworkTypeTool, getNetworkModeTool, setAirplaneModeTool,
         setFlashlightTool, setHotspotTool, setLocationTool, setDoNotDisturbTool,
         setAutoRotateTool, setDarkModeTool, setBrightnessTool, setVolumeTool,
         setRingerModeTool, getBatteryTool, getStorageTool, getRamTool,
