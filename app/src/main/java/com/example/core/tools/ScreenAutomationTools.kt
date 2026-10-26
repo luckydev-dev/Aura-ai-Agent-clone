@@ -7,6 +7,7 @@ import android.util.Log
 import com.example.core.agent.*
 import com.example.core.memory.MemoryRepository
 import com.example.core.memory.database.TaskExecutionEntity
+import com.example.core.memory.database.TaskStepEntity
 import com.example.core.root.RootManager
 import com.example.core.settings.AuraPreferences
 import com.example.service.AuraAccessibilityService
@@ -16,6 +17,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class ScreenAutomationTools(
     private val context: Context,
@@ -26,6 +28,50 @@ class ScreenAutomationTools(
     private val appInventory: AppInventory = AppInventory(context, rootManager)
 ) {
     private val inputController by lazy { com.example.AuraApplication.instance.inputController }
+    private val recentDispatches = ConcurrentHashMap<String, Long>()
+
+    private fun errorResult(
+        code: String,
+        message: String,
+        suggestedNext: String,
+        extra: Map<String, Any?> = emptyMap()
+    ): ToolExecutionResult {
+        val payload = linkedMapOf<String, Any?>(
+            "success" to false,
+            "error_code" to code,
+            "message" to message,
+            "suggested_next" to suggestedNext
+        )
+        payload.putAll(extra)
+        return ToolExecutionResult(false, JSONObject(payload).toString(), data = payload)
+    }
+
+    private fun screenIsAuraFailure(): ToolExecutionResult? {
+        val info = runCatching { AuraAccessibilityService.instance?.getForegroundInfo() }
+            .onFailure { Log.w("Aura", "Could not inspect foreground app before input", it) }
+            .getOrNull() ?: return null
+        if (!info.isAuraOnTop) return null
+        return errorResult(
+            code = "SCREEN_IS_AURA",
+            message = "Aura's own screen is on top. It was not returned as the external app screen.",
+            suggestedNext = "Press Back to return to the last external app, then call read_screen again.",
+            extra = mapOf("lastExternalPackage" to info.lastExternalPackage)
+        )
+    }
+
+    private fun isRecentlyDispatched(target: String, intent: String): Boolean {
+        val key = intent.trim().lowercase(Locale.ROOT) + "|" + target.trim().lowercase(Locale.ROOT)
+        val now = System.currentTimeMillis()
+        val previous = recentDispatches[key]
+        if (previous != null && now - previous < 1200L) return true
+        recentDispatches[key] = now
+        if (recentDispatches.size > 256) {
+            val cutoff = now - 5000L
+            recentDispatches.entries.removeIf { it.value < cutoff }
+        }
+        return false
+    }
+
 
     companion object {
         private const val TAG = "AuraScreenTools"
@@ -79,56 +125,124 @@ class ScreenAutomationTools(
         override val parametersSchema = mapOf("type" to "object", "properties" to emptyMap<String, Any>())
 
         override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
+            screenIsAuraFailure()?.let { return it }
             val nodes = getScreenNodes()
             val summary = ScreenXmlParser.toCompactSummary(nodes)
-            return ToolExecutionResult(true, summary.ifBlank { "Screen is empty or unable to read hierarchy." })
+            return ToolExecutionResult(true, summary.ifBlank { "Screen is empty or unable to read hierarchy." },
+                data = mapOf("source" to if (nodes.size >= 8) "a11y" else "a11y-sparse", "node_count" to nodes.size))
         }
     }
 
     val tapElementTool = object : Tool {
         override val name = "tap_element"
-        override val description = "After read_screen, tap one labelled target exactly once. Never retry toggles merely because the screen looks unchanged."
+        override val description = "Read the screen first, then tap one labelled element. Supports query/index, nth match, region, exact match, and intent. Toggle actions are dispatched once and never retried just because the UI looks unchanged."
         override val parametersSchema = mapOf(
             "type" to "object",
             "properties" to mapOf(
-                "query" to mapOf("type" to "string", "description" to "The button text, label, or content-desc.")
-            ),
-            "required" to listOf("query")
+                "query" to mapOf("type" to "string", "description" to "Visible text, content description, or resource ID."),
+                "index" to mapOf("type" to "integer", "description" to "Exact node index returned by read_screen."),
+                "nth" to mapOf("type" to "integer", "description" to "1-based n-th match when labels repeat."),
+                "region" to mapOf("type" to "string", "description" to "Optional top, bottom, left, or right region."),
+                "exact" to mapOf("type" to "boolean", "description" to "If true, require an exact label match."),
+                "intent" to mapOf("type" to "string", "description" to "Intent such as like, follow, save, open, or tap. Same target+intent is debounced for 1.2 seconds.")
+            )
         )
 
         override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
-            val query = args["query"]?.toString()?.lowercase(Locale.ROOT) ?: return ToolExecutionResult(false, "Missing query")
-            val nodes = getScreenNodes()
-
-            val match = nodes.find {
-                it.text.lowercase(Locale.ROOT).contains(query) ||
-                it.contentDescription.lowercase(Locale.ROOT).contains(query) ||
-                it.resourceId.lowercase(Locale.ROOT).contains(query)
+            screenIsAuraFailure()?.let { return it }
+            val query = args["query"]?.toString()?.trim().orEmpty()
+            val index = (args["index"] as? Number)?.toInt()
+            val nth = ((args["nth"] as? Number)?.toInt() ?: 1).coerceAtLeast(1)
+            val region = args["region"]?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+            val exact = args["exact"] as? Boolean ?: false
+            val intent = args["intent"]?.toString()?.ifBlank { "tap" } ?: "tap"
+            if (index == null && query.isBlank()) {
+                return errorResult("TARGET_NOT_FOUND", "Provide a visible query or node index.", "Call read_screen and choose a label or index.")
             }
 
-            return if (match != null) {
-                runCatching { com.example.AuraApplication.instance.overlayController.dodgeCaptions(match.centerX, match.centerY) }
-                    .onFailure { Log.w("Aura", "Caption dodge failed; continuing tap", it) }
-                val targetLabel = match.text.ifEmpty { match.contentDescription.ifEmpty { match.resourceId } }
-                val beforeState = "${match.text}|${match.contentDescription}|${match.bounds}"
-                val tapRes = inputController.tapResult(match.centerX.toFloat(), match.centerY.toFloat(), "Tap $targetLabel")
-                delay(350)
-                val nodesAfter = getScreenNodes()
-                val targetAfter = nodesAfter.firstOrNull { it.text.equals(match.text, true) && it.contentDescription.equals(match.contentDescription, true) && it.resourceId.equals(match.resourceId, true) }
-                val afterState = targetAfter?.let { "${it.text}|${it.contentDescription}|${it.bounds}" } ?: "target_missing"
-                val togglePattern = Regex("""(?i)\b(like|liked|unlike|heart|favorite|favourite|star|follow|following|save|saved|bookmark|mute|unmute|pin|react|subscribe|switch|checkbox|radio)\b""")
-                val isToggle = togglePattern.containsMatchIn("$targetLabel ${match.className} ${match.resourceId}")
-                val changed = targetAfter == null || beforeState != afterState || nodesAfter.size != nodes.size ||
-                    nodesAfter.map { it.text + it.contentDescription }.hashCode() != nodes.map { it.text + it.contentDescription }.hashCode()
-                if (!tapRes.success && !isToggle) {
-                    val clicked = runCatching { AuraAccessibilityService.instance?.findNodeByQuery(query)?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true }
-                        .onFailure { Log.w("Aura", "Accessibility click fallback failed", it) }.getOrDefault(false)
-                    return ToolExecutionResult(clicked, if (clicked) "Tapped via accessibility fallback; verified=false; state_before=$beforeState; state_after=unknown" else "Tap failed; error_code=GESTURE_CANCELLED; try a more exact element label.")
-                }
-                if (isToggle && !changed) Log.i("Aura", "Toggle target did not visibly change; not retrying: " + targetLabel)
-                ToolExecutionResult(tapRes.success, if (tapRes.success) "Tapped $targetLabel via ${tapRes.method}; verified=$changed; state_before=$beforeState; state_after=$afterState" else "Tap failed; error_code=GESTURE_CANCELLED; try tap_element with another label.")
+            val nodes = getScreenNodes()
+            val display = inputController.getDisplayMetrics()
+            val matched = if (index != null) {
+                nodes.filter { it.index == index }
             } else {
-                ToolExecutionResult(false, "Could not find element matching '$query' on current screen")
+                nodes.filter { node ->
+                    val labels = listOf(node.text, node.contentDescription, node.resourceId)
+                    val labelMatch = labels.any { label ->
+                        if (label.isBlank()) false
+                        else if (exact) label.equals(query, ignoreCase = true)
+                        else label.contains(query, ignoreCase = true)
+                    }
+                    val regionMatch = when (region) {
+                        "top" -> node.centerY < display.y / 3
+                        "bottom" -> node.centerY >= display.y * 2 / 3
+                        "left" -> node.centerX < display.x / 2
+                        "right" -> node.centerX >= display.x / 2
+                        "", "all" -> true
+                        else -> false
+                    }
+                    labelMatch && regionMatch
+                }
+            }
+            val match = matched.getOrNull(nth - 1)
+                ?: return errorResult(
+                    "TARGET_NOT_FOUND",
+                    "No screen element matched the supplied selector.",
+                    "Call read_screen, adjust query/index/region, and retry."
+                )
+
+            val targetLabel = match.text.ifEmpty { match.contentDescription.ifEmpty { match.resourceId } }
+            val targetKey = "${match.packageName}|${match.resourceId}|${match.text}|${match.contentDescription}|${match.centerX},${match.centerY}"
+            if (isRecentlyDispatched(targetKey, intent)) {
+                return errorResult(
+                    "DUPLICATE_ACTION",
+                    "The same target and intent was dispatched within the last 1.2 seconds; a second dispatch was blocked.",
+                    "Read the screen once to verify the current state before trying again.",
+                    extra = mapOf("target" to targetLabel, "intent" to intent)
+                )
+            }
+
+            runCatching { com.example.AuraApplication.instance.overlayController.dodgeCaptions(match.centerX, match.centerY) }
+                .onFailure { Log.w("Aura", "Caption dodge failed; continuing tap", it) }
+
+            val beforeState = "${match.text}|${match.contentDescription}|${match.bounds}|selected=${match.isSelected}|checked=${match.isChecked}|enabled=${match.isEnabled}"
+            val tapRes = inputController.tapResult(match.centerX.toFloat(), match.centerY.toFloat(), "Tap $targetLabel")
+            delay(350L)
+            val nodesAfter = getScreenNodes()
+            val targetAfter = nodesAfter.firstOrNull {
+                it.resourceId.equals(match.resourceId, true) &&
+                    it.contentDescription.equals(match.contentDescription, true) &&
+                    it.text.equals(match.text, true)
+            }
+            val afterState = targetAfter?.let {
+                "${it.text}|${it.contentDescription}|${it.bounds}|selected=${it.isSelected}|checked=${it.isChecked}|enabled=${it.isEnabled}"
+            } ?: "target_missing"
+            val togglePattern = Regex("""(?i)\b(like|liked|unlike|heart|favorite|favourite|star|follow|following|save|saved|bookmark|mute|unmute|pin|react|subscribe|notification bell|switch|checkbox|radio)\b""")
+            val isToggle = togglePattern.containsMatchIn("$targetLabel ${match.className} ${match.resourceId}")
+            val changed = targetAfter == null ||
+                beforeState != afterState ||
+                nodesAfter.size != nodes.size ||
+                nodesAfter.map { it.text + it.contentDescription }.hashCode() != nodes.map { it.text + it.contentDescription }.hashCode()
+
+            if (!tapRes.success && !isToggle) {
+                val clicked = runCatching {
+                    AuraAccessibilityService.instance?.findNodeByQuery(query)?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true
+                }.onFailure { Log.w("Aura", "Accessibility click fallback failed", it) }.getOrDefault(false)
+                return if (clicked) {
+                    ToolExecutionResult(true, "Tapped via accessibility fallback; verified=false; state_before=$beforeState; state_after=unknown",
+                        data = mapOf("verified" to false, "method" to "accessibility", "state_before" to beforeState, "state_after" to "unknown"))
+                } else {
+                    errorResult("GESTURE_CANCELLED", "Android did not dispatch the tap.", "Try a more exact element, index, or tap_xy after checking the screen.",
+                        extra = mapOf("state_before" to beforeState, "state_after" to afterState))
+                }
+            }
+            if (isToggle && !changed) Log.i("Aura", "Toggle target did not visibly change; not retrying: " + targetLabel)
+            return if (tapRes.success) {
+                val msg = if (isToggle && !changed) "Tapped '$targetLabel'; state unchanged (toggle), not retrying."
+                    else "Tapped '$targetLabel' via ${tapRes.method}; verified=$changed."
+                ToolExecutionResult(true, msg, data = mapOf("verified" to changed, "method" to tapRes.method.name, "state_before" to beforeState, "state_after" to afterState, "intent" to intent))
+            } else {
+                errorResult("GESTURE_CANCELLED", "The tap was not dispatched successfully.", "Read the screen and try a different interaction method.",
+                    extra = mapOf("state_before" to beforeState, "state_after" to afterState, "intent" to intent))
             }
         }
     }
@@ -146,11 +260,17 @@ class ScreenAutomationTools(
         )
 
         override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
-            val x = (args["x"] as? Number)?.toFloat() ?: return ToolExecutionResult(false, "Missing x")
-            val y = (args["y"] as? Number)?.toFloat() ?: return ToolExecutionResult(false, "Missing y")
+            screenIsAuraFailure()?.let { return it }
+            val x = (args["x"] as? Number)?.toFloat() ?: return errorResult("TARGET_NOT_FOUND", "Missing x coordinate.", "Provide x and y from screen_size.")
+            val y = (args["y"] as? Number)?.toFloat() ?: return errorResult("TARGET_NOT_FOUND", "Missing y coordinate.", "Provide x and y from screen_size.")
+            val intent = args["intent"]?.toString()?.ifBlank { "tap" } ?: "tap"
+            if (isRecentlyDispatched("xy=${x.toInt()},${y.toInt()}", intent)) {
+                return errorResult("DUPLICATE_ACTION", "The same coordinate tap was recently dispatched.", "Read the screen once before trying again.")
+            }
             runCatching { com.example.AuraApplication.instance.overlayController.dodgeCaptions(x.toInt(), y.toInt()) }.onFailure { Log.w("Aura", "Caption dodge failed; continuing coordinate tap", it) }
             val res = inputController.tapResult(x, y, "Tap ($x, $y)")
-            return ToolExecutionResult(res.success, if (res.success) "Tapped at ($x, $y) via ${res.method}" else "Failed to tap ($x, $y): ${res.error}")
+            return if (res.success) ToolExecutionResult(true, "Tapped at ($x, $y) via ${res.method}", data = mapOf("verified" to false, "method" to res.method.name))
+                else errorResult("GESTURE_CANCELLED", "The coordinate tap was not dispatched.", "Read the screen and try another location.")
         }
     }
 
@@ -181,6 +301,7 @@ class ScreenAutomationTools(
         override val description = "Long-press one visible item using its label or node index. Read the screen first."
         override val parametersSchema = mapOf("type" to "object", "properties" to mapOf("query" to mapOf("type" to "string", "description" to "Visible label or content description."), "index" to mapOf("type" to "integer", "description" to "Optional node index."), "duration_ms" to mapOf("type" to "integer", "description" to "Duration milliseconds; default 1000.")))
         override suspend fun execute(args: Map<String, Any?>): ToolExecutionResult {
+            screenIsAuraFailure()?.let { return it }
             val nodes = getScreenNodes()
             val query = args["query"]?.toString()?.trim().orEmpty()
             val index = (args["index"] as? Number)?.toInt()
@@ -204,13 +325,15 @@ class ScreenAutomationTools(
             val match = nodes.firstOrNull { it.text.contains(query, true) || it.contentDescription.contains(query, true) } ?: return ToolExecutionResult(false, "error_code=TARGET_NOT_FOUND; target not found.")
             val before = "${match.text}|${match.contentDescription}|${match.bounds}"
             runCatching { com.example.AuraApplication.instance.overlayController.dodgeCaptions(match.centerX, match.centerY) }.onFailure { Log.w("Aura", "Caption dodge failed; continuing double-tap", it) }
-            val first = inputController.tapResult(match.centerX.toFloat(), match.centerY.toFloat(), "Double tap item")
-            if (!first.success) return ToolExecutionResult(false, "error_code=GESTURE_CANCELLED; double-tap failed.")
-            delay(80L)
-            val second = inputController.tapResult(match.centerX.toFloat(), match.centerY.toFloat(), "Double tap item")
+            val targetKey = "${match.packageName}|${match.resourceId}|${match.text}|${match.contentDescription}|${match.centerX},${match.centerY}"
+            if (isRecentlyDispatched(targetKey, "double_tap")) return errorResult("DUPLICATE_ACTION", "A double-tap was already dispatched for this item recently.", "Read the screen to confirm whether the item is already liked.")
+            val dispatched = inputController.doubleTap(match.centerX.toFloat(), match.centerY.toFloat(), "Double tap item")
             delay(350L)
-            val after = getScreenNodes().firstOrNull { it.text.equals(match.text, true) || it.contentDescription.equals(match.contentDescription, true) }?.let { "${it.text}|${it.contentDescription}|${it.bounds}" } ?: "target_missing"
-            return ToolExecutionResult(second.success, "Double-tap dispatched; verified=" + (before != after) + "; state_before=" + before + "; state_after=" + after)
+            val after = getScreenNodes().firstOrNull { it.text.equals(match.text, true) || it.contentDescription.equals(match.contentDescription, true) }
+                ?.let { "${it.text}|${it.contentDescription}|${it.bounds}" } ?: "target_missing"
+            return if (dispatched) ToolExecutionResult(true, "Double-tap dispatched once; verified=${before != after}; state_before=$before; state_after=$after",
+                data = mapOf("verified" to (before != after), "state_before" to before, "state_after" to after, "method" to "double_tap"))
+            else errorResult("GESTURE_CANCELLED", "Android did not dispatch the double-tap.", "Check the screen and try a labelled tap if appropriate.")
         }
     }
 
