@@ -25,20 +25,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Clone source repository
+      - name: Checkout upstream source without overwriting clone
         run: |
           set -euo pipefail
-          rm -rf /tmp/Aura-Ai-Agent
-          git clone --depth 1 https://github.com/luckydev-dev/Aura-Ai-Agent.git /tmp/Aura-Ai-Agent
-
-      - name: Copy source files but preserve destination workflow
-        run: |
-          set -euo pipefail
-          rsync -a --delete \
-            --exclude='.git/' \
-            --exclude='.github/workflows/main.yml' \
-            --exclude='.github/workflows/' \
-            /tmp/Aura-Ai-Agent/ ./
+          echo "This clone is now maintained independently; source sync is intentionally disabled."
 
       - name: Commit and push changes
         env:
