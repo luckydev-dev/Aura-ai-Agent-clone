@@ -83,17 +83,40 @@ class MemoryRepository(context: Context) {
     fun getAllFacts(): Flow<List<UserFactEntity>> = userFactDao.getAll()
 
     suspend fun saveFact(key: String, value: String, category: String = "fact") {
+        val normalizedKey = key.trim()
+        val normalizedValue = value.trim()
+        val normalizedCategory = category.trim().lowercase()
+        require(normalizedKey.isNotBlank()) { "Fact key cannot be blank" }
+        require(normalizedValue.isNotBlank()) { "Fact value cannot be blank" }
+        require(normalizedKey.length <= 120) { "Fact key is too long (max 120 characters)" }
+        require(normalizedValue.length <= 8000) { "Fact value is too long (max 8000 characters)" }
+        val existing = userFactDao.findByKeyNormalized(normalizedKey)
         userFactDao.insert(
             UserFactEntity(
-                key = key.trim(),
-                value = value.trim(),
-                category = category.trim()
+                id = existing?.id ?: 0,
+                key = normalizedKey,
+                value = normalizedValue,
+                category = normalizedCategory.ifBlank { "fact" }
             )
         )
     }
 
+    suspend fun getFactById(id: Long): UserFactEntity? = userFactDao.getById(id)
+
+    suspend fun updateFact(id: Long, key: String, value: String, category: String = "fact") {
+        val normalizedKey = key.trim()
+        val normalizedValue = value.trim()
+        require(normalizedKey.isNotBlank() && normalizedValue.isNotBlank()) { "Fact key and value are required" }
+        require(normalizedKey.length <= 120) { "Fact key is too long (max 120 characters)" }
+        require(normalizedValue.length <= 8000) { "Fact value is too long (max 8000 characters)" }
+        val conflicting = userFactDao.findByKeyNormalized(normalizedKey)
+        require(conflicting == null || conflicting.id == id) { "A fact with this key already exists" }
+        val current = userFactDao.getById(id) ?: return
+        userFactDao.insert(current.copy(key = normalizedKey, value = normalizedValue, category = category.trim().lowercase().ifBlank { "fact" }))
+    }
+
     suspend fun findFact(key: String): String? {
-        return userFactDao.findByKey(key.trim())?.value
+        return userFactDao.findByKeyNormalized(key.trim())?.value
     }
 
     suspend fun deleteFact(id: Long) = userFactDao.deleteById(id)
