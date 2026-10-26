@@ -1,0 +1,25 @@
+name: Clone Aura AI Agent
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  clone-target-repo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Clone Aura-Ai-Agent into temp folder only
+        run: |
+          rm -rf /tmp/Aura-Ai-Agent
+          git clone https://github.com/luckydev-dev/Aura-Ai-Agent.git /tmp/Aura-Ai-Agent
+
+      - name: Show cloned repo contents
+        run: |
+          ls -la /tmp/Aura-Ai-Agent
+          find /tmp/Aura-Ai-Agent -maxdepth 2 -type f | head
