@@ -2,14 +2,9 @@ name: Sync Aura AI Agent
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: "17 */6 * * *"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: aura-ai-agent-sync
