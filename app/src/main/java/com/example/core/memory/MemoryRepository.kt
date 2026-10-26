@@ -11,6 +11,7 @@ class MemoryRepository(context: Context) {
     private val actionLogDao = database.actionLogDao()
     private val userFactDao = database.userFactDao()
     private val taskExecutionDao = database.taskExecutionDao()
+    private val taskStepDao = database.taskStepDao()
     private val routineDao = database.routineDao()
 
     // Conversations
@@ -82,33 +83,54 @@ class MemoryRepository(context: Context) {
     // User Facts & Memory
     fun getAllFacts(): Flow<List<UserFactEntity>> = userFactDao.getAll()
 
-    suspend fun saveFact(key: String, value: String, category: String = "fact") {
+    suspend fun saveFact(key: String, value: String, category: String = "fact", pinned: Boolean? = null) {
         val cleanKey = key.trim()
         val cleanValue = value.trim()
         require(cleanKey.isNotBlank() && cleanValue.isNotBlank()) { "Fact key and value are required" }
         require(cleanKey.length <= 120) { "Fact key is too long (max 120 characters)" }
         require(cleanValue.length <= 8000) { "Fact value is too long (max 8000 characters)" }
+        val normalized = cleanKey.lowercase(java.util.Locale.ROOT)
         val existing = userFactDao.findByKeyNormalized(cleanKey)
+        val now = System.currentTimeMillis()
         userFactDao.insert(
             UserFactEntity(
                 id = existing?.id ?: 0,
                 key = cleanKey,
                 value = cleanValue,
-                category = category.trim().lowercase().ifBlank { "fact" }
+                category = category.trim().lowercase().ifBlank { "fact" },
+                keyNormalized = normalized,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now,
+                pinned = pinned ?: existing?.pinned ?: false
             )
         )
     }
 
-    suspend fun updateFact(id: Long, key: String, value: String, category: String = "fact") {
+    suspend fun updateFact(id: Long, key: String, value: String, category: String = "fact", pinned: Boolean? = null) {
         val cleanKey = key.trim()
         val cleanValue = value.trim()
         require(cleanKey.isNotBlank() && cleanValue.isNotBlank()) { "Fact key and value are required" }
         require(cleanKey.length <= 120) { "Fact key is too long (max 120 characters)" }
         require(cleanValue.length <= 8000) { "Fact value is too long (max 8000 characters)" }
+        val normalized = cleanKey.lowercase(java.util.Locale.ROOT)
         val conflicting = userFactDao.findByKeyNormalized(cleanKey)
         require(conflicting == null || conflicting.id == id) { "A fact with this key already exists" }
         val current = userFactDao.getById(id) ?: return
-        userFactDao.insert(current.copy(key = cleanKey, value = cleanValue, category = category.trim().lowercase().ifBlank { "fact" }))
+        userFactDao.insert(
+            current.copy(
+                key = cleanKey,
+                value = cleanValue,
+                category = category.trim().lowercase().ifBlank { "fact" },
+                keyNormalized = normalized,
+                updatedAt = System.currentTimeMillis(),
+                pinned = pinned ?: current.pinned
+            )
+        )
+    }
+
+    suspend fun setFactPinned(id: Long, pinned: Boolean) {
+        val current = userFactDao.getById(id) ?: return
+        userFactDao.insert(current.copy(pinned = pinned, updatedAt = System.currentTimeMillis()))
     }
 
     suspend fun getFactById(id: Long): UserFactEntity? = userFactDao.getById(id)
@@ -142,6 +164,16 @@ class MemoryRepository(context: Context) {
 
     suspend fun logTask(task: TaskExecutionEntity) {
         taskExecutionDao.insert(task)
+    }
+
+    fun getTaskSteps(taskId: String): Flow<List<TaskStepEntity>> = taskStepDao.getByTaskId(taskId)
+
+    suspend fun logTaskStep(step: TaskStepEntity) {
+        taskStepDao.insert(step)
+    }
+
+    suspend fun clearTaskSteps(taskId: String) {
+        taskStepDao.deleteByTaskId(taskId)
     }
 
     suspend fun deleteTask(id: Long) = taskExecutionDao.deleteById(id)
