@@ -53,6 +53,11 @@ object ScreenXmlParser {
                         val bounds = getAttr(parser, "bounds")
                         val clickable = getAttr(parser, "clickable").equals("true", ignoreCase = true)
                         val focusable = getAttr(parser, "focusable").equals("true", ignoreCase = true)
+                        val selected = getAttr(parser, "selected").equals("true", ignoreCase = true)
+                        val checked = getAttr(parser, "checked").equals("true", ignoreCase = true)
+                        val enabled = !getAttr(parser, "enabled").equals("false", ignoreCase = true)
+                        val focused = getAttr(parser, "focused").equals("true", ignoreCase = true)
+                        val password = getAttr(parser, "password").equals("true", ignoreCase = true)
 
                         val (cx, cy) = parseCenter(bounds)
 
@@ -67,7 +72,12 @@ object ScreenXmlParser {
                                     centerX = cx,
                                     centerY = cy,
                                     isClickable = clickable,
-                                    isFocusable = focusable
+                                    isFocusable = focusable,
+                                    isSelected = selected,
+                                    isChecked = checked,
+                                    isEnabled = enabled,
+                                    isFocused = focused,
+                                    isPassword = password
                                 )
                             )
                         }
@@ -103,6 +113,11 @@ object ScreenXmlParser {
             val bounds = attrs["bounds"] ?: ""
             val clickable = (attrs["clickable"] ?: "false").equals("true", ignoreCase = true)
             val focusable = (attrs["focusable"] ?: "false").equals("true", ignoreCase = true)
+            val selected = (attrs["selected"] ?: "false").equals("true", ignoreCase = true)
+            val checked = (attrs["checked"] ?: "false").equals("true", ignoreCase = true)
+            val enabled = !(attrs["enabled"] ?: "true").equals("false", ignoreCase = true)
+            val focused = (attrs["focused"] ?: "false").equals("true", ignoreCase = true)
+            val password = (attrs["password"] ?: "false").equals("true", ignoreCase = true)
             val (cx, cy) = parseCenter(bounds)
 
             if (text.isNotBlank() || contentDesc.isNotBlank() || resourceId.isNotBlank() || clickable || focusable) {
@@ -116,7 +131,12 @@ object ScreenXmlParser {
                         centerX = cx,
                         centerY = cy,
                         isClickable = clickable,
-                        isFocusable = focusable
+                        isFocusable = focusable,
+                        isSelected = selected,
+                        isChecked = checked,
+                        isEnabled = enabled,
+                        isFocused = focused,
+                        isPassword = password
                     )
                 )
             }
