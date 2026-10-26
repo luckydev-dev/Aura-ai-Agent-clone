@@ -179,7 +179,7 @@ class AuraAccessibilityService : AccessibilityService() {
      * Traverses in-memory active window hierarchy and extracts compact ScreenNodes (sub-30ms).
      */
     fun extractScreenNodes(): List<ScreenNode> {
-        val root = rootInActiveWindow ?: return emptyList()
+        val root = selectedExternalRoot() ?: return emptyList()
         val nodes = mutableListOf<ScreenNode>()
         var counter = 1
 
@@ -198,6 +198,11 @@ class AuraAccessibilityService : AccessibilityService() {
             val isEditable = node.isEditable
             val isScrollable = node.isScrollable
             val isFocusable = node.isFocusable
+            val isSelected = node.isSelected
+            val isChecked = node.isChecked
+            val isEnabled = node.isEnabled
+            val isFocused = node.isFocused
+            val isPassword = node.isPassword
 
             // Include interactive or informative nodes, skip 0-size invisible bounds
             if (pkg != ownPackage && pkg != "com.android.systemui" && rect.width() > 0 && rect.height() > 0) {
@@ -216,7 +221,12 @@ class AuraAccessibilityService : AccessibilityService() {
                             index = counter++,
                             isEditable = isEditable,
                             isScrollable = isScrollable,
-                            packageName = pkg
+                            packageName = pkg,
+                            isSelected = isSelected,
+                            isChecked = isChecked,
+                            isEnabled = isEnabled,
+                            isFocused = isFocused,
+                            isPassword = isPassword
                         )
                     )
                 }
@@ -239,7 +249,7 @@ class AuraAccessibilityService : AccessibilityService() {
      * Sets text on an editable node directly via accessibility arguments.
      */
     fun setTextOnActiveNode(text: String): Boolean {
-        val root = rootInActiveWindow ?: return false
+        val root = selectedExternalRoot() ?: return false
         val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (focused != null && focused.isEditable) {
             val args = Bundle().apply {
@@ -254,7 +264,7 @@ class AuraAccessibilityService : AccessibilityService() {
      * Finds the deepest clickable node containing (x, y) or climbs up to a clickable ancestor.
      */
     fun findClickableNodeAt(x: Float, y: Float): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
+        val root = selectedExternalRoot() ?: return null
         val ix = x.toInt()
         val iy = y.toInt()
         var bestNode: AccessibilityNodeInfo? = null
