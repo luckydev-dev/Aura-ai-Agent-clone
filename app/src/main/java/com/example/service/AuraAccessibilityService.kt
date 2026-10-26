@@ -44,14 +44,14 @@ class AuraAccessibilityService : AccessibilityService() {
         }.onFailure { Log.e("Aura", "Could not enable interactive-window retrieval", it) }
         updateForegroundFromWindows()
         runCatching { com.example.AuraApplication.instance.overlayController.edgeLightingLifecycleChanged() }
-            .onFailure { Log.w("Aura", "Edge-lighting connect hook failed", it) }
+            .onFailure { error: Throwable -> Log.w("Aura", "Edge-lighting connect hook failed", error) }
     }
 
     override fun onDestroy() {
         serviceScope.cancel()
         if (instance === this) instance = null
         runCatching { com.example.AuraApplication.instance.overlayController.edgeLightingLifecycleChanged() }
-            .onFailure { Log.w("Aura", "Edge-lighting disconnect hook failed", it) }
+            .onFailure { error: Throwable -> Log.w("Aura", "Edge-lighting disconnect hook failed", error) }
         super.onDestroy()
     }
 
@@ -65,9 +65,9 @@ class AuraAccessibilityService : AccessibilityService() {
                     while (recentExternalPackages.size > 8) recentExternalPackages.removeFirst()
                 }
             }
-            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
-                event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+                event?.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
             ) foregroundPackage = pkg
         }
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) updateForegroundFromWindows()
