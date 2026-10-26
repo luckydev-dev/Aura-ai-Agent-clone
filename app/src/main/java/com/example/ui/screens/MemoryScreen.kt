@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
@@ -16,6 +17,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.window.DialogProperties
 import android.util.Log
+import android.content.Intent
+import org.json.JSONArray
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,7 +44,7 @@ fun MemoryScreen(
     val scope = rememberCoroutineScope()
     val colors = AuraTheme.colors
     val typography = AuraTheme.typography
-    val repository = remember { MemoryRepository(context.applicationContext) }
+    val repository = remember { com.example.AuraApplication.instance.memoryRepository }
     val snackbar = remember { SnackbarHostState() }
 
     val facts by repository.getAllFacts().collectAsState(initial = emptyList())
@@ -46,6 +53,9 @@ fun MemoryScreen(
     var newKey by remember { mutableStateOf("") }
     var newValue by remember { mutableStateOf("") }
     var newCategory by remember { mutableStateOf("alias") }
+    var newPinned by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var importJson by remember { mutableStateOf("") }
     var editingId by remember { mutableStateOf<Long?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("all") }
@@ -77,6 +87,7 @@ fun MemoryScreen(
                         newKey = ""
                         newValue = ""
                         newCategory = "alias"
+                        newPinned = false
                         showAddDialog = true
                     },
                     isPrimary = true,
@@ -98,6 +109,28 @@ fun MemoryScreen(
         )
 
         OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Search facts") }, singleLine = true)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton(onClick = {
+                val json = JSONArray()
+                facts.forEach { fact ->
+                    json.put(JSONObject().apply {
+                        put("key", fact.key)
+                        put("value", fact.value)
+                        put("category", fact.category)
+                        put("pinned", fact.pinned)
+                        put("createdAt", fact.createdAt)
+                        put("updatedAt", fact.updatedAt)
+                    })
+                }
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_TEXT, json.toString(2))
+                }
+                runCatching { context.startActivity(Intent.createChooser(shareIntent, "Export Aura memories")) }
+                    .onFailure { Log.e("Aura", "Could not open memory export sheet", it) }
+            }) { Text("Export JSON") }
+            TextButton(onClick = { importJson = ""; showImportDialog = true }) { Text("Import JSON") }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
             FilterChip(selected = selectedCategory == "all", onClick = { selectedCategory = "all" }, label = { Text("All (" + facts.size + ")") })
             categories.forEach { category ->
@@ -135,6 +168,7 @@ fun MemoryScreen(
                                 newKey = fact.key
                                 newValue = fact.value
                                 newCategory = fact.category
+                                newPinned = fact.pinned
                                 showAddDialog = true
                             }
                             .padding(14.dp),
@@ -153,6 +187,12 @@ fun MemoryScreen(
                             androidx.compose.foundation.text.BasicText(
                                 text = fact.value,
                                 style = typography.bodyMedium.copy(color = colors.textSecondary)
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                (if (fact.pinned) "📌 Pinned · " else "") + "Updated " + formatFactTime(fact.updatedAt),
+                                color = colors.textTertiary,
+                                style = typography.bodySmall
                             )
                         }
 
@@ -190,6 +230,10 @@ fun MemoryScreen(
             OutlinedTextField(value = newValue, onValueChange = { newValue = it.take(8000) }, modifier = Modifier.fillMaxWidth(), label = { Text("Value") }, minLines = 3, maxLines = 6)
             Text("Category", color = colors.textSecondary)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { categories.forEach { category -> FilterChip(selected = newCategory.equals(category, true), onClick = { newCategory = category }, label = { Text(category) }) } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = newPinned, onCheckedChange = { newPinned = it })
+                Text("Pin to top", color = colors.textSecondary)
+            }
             Text("Duplicate keys are matched case-insensitively and updated.", color = colors.textTertiary, style = typography.bodySmall)
         } },
         confirmButton = { TextButton(enabled = newKey.isNotBlank() && newValue.isNotBlank(), onClick = {
@@ -198,7 +242,7 @@ fun MemoryScreen(
             scope.launch {
                 try {
                     val oldId = editingId
-                    if (oldId == null) repository.saveFact(key, value, newCategory) else repository.updateFact(oldId, key, value, newCategory)
+                    if (oldId == null) repository.saveFact(key, value, newCategory, newPinned) else repository.updateFact(oldId, key, value, newCategory, newPinned)
                     val lower = key.lowercase()
                     if (lower in listOf("owner_name", "preferred_name", "nickname", "name", "call_me", "user_name") || lower.contains("name")) com.example.core.settings.AuraPreferences(context).setOwnerName(value)
                     showAddDialog = false
@@ -213,6 +257,51 @@ fun MemoryScreen(
             }
         }) { Text("Save") } },
         dismissButton = { TextButton(onClick = { showAddDialog = false }) { Text("Cancel") } },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    )
+
+    if (showImportDialog) AlertDialog(
+        onDismissRequest = { showImportDialog = false },
+        title = { Text("Import memories from JSON") },
+        text = {
+            OutlinedTextField(
+                value = importJson,
+                onValueChange = { importJson = it.take(200000) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Paste exported JSON array") },
+                minLines = 5,
+                maxLines = 10
+            )
+        },
+        confirmButton = {
+            TextButton(enabled = importJson.isNotBlank(), onClick = {
+                scope.launch {
+                    try {
+                        val array = JSONArray(importJson)
+                        var imported = 0
+                        for (i in 0 until array.length()) {
+                            val item = array.optJSONObject(i) ?: continue
+                            val key = item.optString("key").trim()
+                            val value = item.optString("value").trim()
+                            if (key.isBlank() || value.isBlank()) continue
+                            repository.saveFact(
+                                key = key,
+                                value = value,
+                                category = item.optString("category", "fact"),
+                                pinned = item.optBoolean("pinned", false)
+                            )
+                            imported++
+                        }
+                        showImportDialog = false
+                        snackbar.showSnackbar("Imported or updated $imported memories")
+                    } catch (e: Exception) {
+                        Log.e("Aura", "Memory import failed", e)
+                        snackbar.showSnackbar("Import failed: invalid JSON or unsupported format")
+                    }
+                }
+            }) { Text("Import") }
+        },
+        dismissButton = { TextButton(onClick = { showImportDialog = false }) { Text("Cancel") } },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     )
 
@@ -242,9 +331,16 @@ fun MemoryScreen(
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Deleted: " + fact.key, modifier = Modifier.weight(1f))
             TextButton(onClick = { scope.launch {
-                try { repository.saveFact(fact.key, fact.value, fact.category); undoTarget = null; snackbar.showSnackbar("Memory restored") }
+                try { repository.saveFact(fact.key, fact.value, fact.category, fact.pinned); undoTarget = null; snackbar.showSnackbar("Memory restored") }
                 catch (e: Exception) { Log.e("Aura", "Undo restore failed", e); snackbar.showSnackbar("Undo failed") }
             } }) { Text("Undo") }
         }
     } }
+}
+
+private fun formatFactTime(timestamp: Long): String = try {
+    SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(timestamp))
+} catch (e: Exception) {
+    android.util.Log.e("Aura", "Formatting memory timestamp failed", e)
+    "time unavailable"
 }
