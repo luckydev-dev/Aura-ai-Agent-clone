@@ -17,6 +17,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.example.core.live.CaptionState
+import com.example.core.util.onMainBlocking
+import com.example.core.util.runOnMain
 import com.example.core.settings.AuraPreferences
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -69,7 +71,9 @@ class FloatingCaptionOverlay(
         }
     }
 
-    fun show(): Boolean {
+    fun show(): Boolean = onMainBlocking { showOnMain() }
+
+    private fun showOnMain(): Boolean {
         var result = false
         OverlayGuard.run("floating_captions", context) {
             if (isAttached) {
@@ -316,7 +320,9 @@ class FloatingCaptionOverlay(
         }
     }
 
-    fun updateCaptions(caption: CaptionState) {
+    fun updateCaptions(caption: CaptionState) = runOnMain { updateCaptionsOnMain(caption) }
+
+    private fun updateCaptionsOnMain(caption: CaptionState) {
         OverlayGuard.run("floating_captions", context) {
             currentCaption = caption
             val userText = caption.userText.trim()
@@ -402,7 +408,9 @@ class FloatingCaptionOverlay(
         }
     }
 
-    fun hideImmediate() {
+    fun hideImmediate() = runOnMain { hideImmediateOnMain() }
+
+    private fun hideImmediateOnMain() {
         OverlayGuard.run("floating_captions", context) {
             isVisible = false
             autoHideJob?.cancel()
@@ -413,7 +421,9 @@ class FloatingCaptionOverlay(
         }
     }
 
-    fun destroy() {
+    fun destroy() = onMainBlocking { destroyOnMain() }
+
+    private fun destroyOnMain() {
         OverlayGuard.run("floating_captions", context) {
             autoHideJob?.cancel()
             restoreDodgeJob?.cancel()
