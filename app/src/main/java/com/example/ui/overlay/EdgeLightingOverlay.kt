@@ -52,7 +52,7 @@ class EdgeLightingOverlay(private val context: Context) {
                 edgeView = null; isOverlayAttached = false
             }
             val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val params = OverlayWindowDefaults.createLayoutParams(title = WINDOW_NAME, width = WindowManager.LayoutParams.MATCH_PARENT, height = WindowManager.LayoutParams.MATCH_PARENT, alpha = 0.79f, isTouchable = false).apply { type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY }
+            val params = OverlayWindowDefaults.createLayoutParams(title = WINDOW_NAME, width = WindowManager.LayoutParams.MATCH_PARENT, height = WindowManager.LayoutParams.MATCH_PARENT, alpha = 0.79f, isTouchable = false).also { it.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY }
             val view = EdgeLightingView(context).apply {
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 intensity = (currentIntensity / OverlayWindowDefaults.MAX_PASSTHROUGH_ALPHA).coerceAtMost(1.5f)
