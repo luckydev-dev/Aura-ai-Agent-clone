@@ -73,13 +73,8 @@ object OverlayGuard {
             diag?.log(TAG, "Overlay error in '$overlayKey' ($count/$MAX_FAILURES within 5m):\n$stackTrace")
 
             if (count >= MAX_FAILURES) {
-                if (overlayKey == "edge_lighting") {
-                    Log.w(TAG, "Edge lighting reached the failure threshold; keeping the preference enabled for watchdog recovery.")
-                    postNotification(context, overlayKey, "Edge Lighting", stackTrace)
-                } else {
-                    Log.w(TAG, "Overlay '$overlayKey' exceeded failure threshold ($count). Auto-disabling.")
-                    autoDisableOverlay(overlayKey, context, stackTrace)
-                }
+                Log.w(TAG, "Overlay '$overlayKey' exceeded failure threshold ($count). Auto-disabling.")
+                autoDisableOverlay(overlayKey, context, stackTrace)
                 list.clear()
             }
         }
