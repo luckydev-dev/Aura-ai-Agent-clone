@@ -2,6 +2,8 @@ package com.example.core.memory.database
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -92,6 +94,18 @@ interface TaskExecutionDao {
 }
 
 @Dao
+interface TaskStepDao {
+    @Query("SELECT * FROM task_steps WHERE taskId = :taskId ORDER BY step ASC")
+    fun getByTaskId(taskId: String): Flow<List<TaskStepEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(step: TaskStepEntity): Long
+
+    @Query("DELETE FROM task_steps WHERE taskId = :taskId")
+    suspend fun deleteByTaskId(taskId: String)
+}
+
+@Dao
 interface RoutineDao {
     @Query("SELECT * FROM routines ORDER BY createdAt DESC")
     fun getAllRoutines(): Flow<List<RoutineEntity>>
@@ -124,9 +138,10 @@ interface RoutineDao {
         ActionLogEntity::class,
         UserFactEntity::class,
         TaskExecutionEntity::class,
+        TaskStepEntity::class,
         RoutineEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -134,9 +149,67 @@ abstract class AuraDatabase : RoomDatabase() {
     abstract fun actionLogDao(): ActionLogDao
     abstract fun userFactDao(): UserFactDao
     abstract fun taskExecutionDao(): TaskExecutionDao
+    abstract fun taskStepDao(): TaskStepDao
     abstract fun routineDao(): RoutineDao
 
     companion object {
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS task_executions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        taskId TEXT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        goal TEXT NOT NULL,
+                        stepsJson TEXT NOT NULL,
+                        outcome TEXT NOT NULL,
+                        success INTEGER NOT NULL,
+                        durationMs INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS routines (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        triggerPhrase TEXT NOT NULL,
+                        stepsJson TEXT NOT NULL,
+                        scheduledTime TEXT NOT NULL,
+                        isEnabled INTEGER NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE user_facts ADD COLUMN keyNormalized TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE user_facts ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE user_facts ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE user_facts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("DELETE FROM user_facts WHERE id NOT IN (SELECT MAX(id) FROM user_facts GROUP BY LOWER(TRIM(`key`)))")
+                database.execSQL("UPDATE user_facts SET keyNormalized = LOWER(TRIM(`key`))")
+                database.execSQL("UPDATE user_facts SET createdAt = CASE WHEN createdAt = 0 THEN CAST(strftime('%s','now') AS INTEGER) * 1000 ELSE createdAt END")
+                database.execSQL("UPDATE user_facts SET updatedAt = CASE WHEN updatedAt = 0 THEN createdAt ELSE updatedAt END")
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_user_facts_keyNormalized ON user_facts(keyNormalized)")
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS task_steps (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        taskId TEXT NOT NULL,
+                        step INTEGER NOT NULL,
+                        thought TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        paramsJson TEXT NOT NULL,
+                        result TEXT NOT NULL,
+                        verified INTEGER NOT NULL,
+                        screenSignature TEXT NOT NULL,
+                        timestamp INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var INSTANCE: AuraDatabase? = null
 
@@ -146,7 +219,7 @@ abstract class AuraDatabase : RoomDatabase() {
                     context.applicationContext,
                     AuraDatabase::class.java,
                     "aura_database.db"
-                ).fallbackToDestructiveMigration().build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
                 INSTANCE = instance
                 instance
             }
