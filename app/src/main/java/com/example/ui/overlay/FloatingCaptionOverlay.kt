@@ -254,6 +254,13 @@ class FloatingCaptionOverlay(
      * Auto-dodges if agent is about to tap or swipe at (x, y) that intersects caption area.
      */
     fun dodgeIfNeeded(targetX: Int, targetY: Int) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                runCatching { dodgeIfNeeded(targetX, targetY) }
+                    .onFailure { Log.e(TAG, "Caption dodge failed on main thread", it) }
+            }
+            return
+        }
         val params = windowParams ?: return
         if (!isAttached || !isVisible || rootView?.visibility != View.VISIBLE) return
 
@@ -284,6 +291,13 @@ class FloatingCaptionOverlay(
     }
 
     private fun scheduleRestorePosition() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                runCatching { scheduleRestorePosition() }
+                    .onFailure { Log.e(TAG, "Scheduling caption restore failed on main thread", it) }
+            }
+            return
+        }
         restoreDodgeJob?.cancel()
         restoreDodgeJob = scope.launch {
             delay(3000L)
